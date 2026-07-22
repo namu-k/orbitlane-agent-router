@@ -1,14 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { markerBoundedPolicy } from "../policy/index.js";
 
 const TARGET_NAMES = Object.freeze(["codex", "claude"]);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-function ownedBlock(target, policy) {
-  return `<!-- ORBITLANE:START ${target} -->\n${policy}\n<!-- ORBITLANE:END ${target} -->\n`;
-}
 
 function ownedBlockPattern(target) {
   return new RegExp(`${escape(`<!-- ORBITLANE:START ${target} -->`)}[\\s\\S]*?${escape(`<!-- ORBITLANE:END ${target} -->`)}\\n?`, "g");
@@ -107,7 +104,7 @@ function runtimeFailure(adapter) {
 }
 
 function installDiff(target, instruction, generated, rendered) {
-  const replacement = ownedBlock(target, rendered.policy);
+  const replacement = markerBoundedPolicy(target, rendered.policy.endsWith("\n") ? rendered.policy : `${rendered.policy}\n`);
   const instructionAfter = ownedBlockPattern(target).test(instruction.content)
     ? instruction.content.replace(ownedBlockPattern(target), replacement)
     : `${instruction.content}${replacement}`;
