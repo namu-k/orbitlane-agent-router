@@ -1,0 +1,8 @@
+{
+  "adapter": "claude",
+  "reasoning": {
+    "effort": "supported",
+    "thinking": "session-inherited",
+    "effective": "unproven"
+  }
+}

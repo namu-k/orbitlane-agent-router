@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitlane.dev/schema/contract-1.0.0.json",
+  "title": "OrbitLane routing contract",
+  "type": "object",
+  "required": ["contract_version", "lanes", "roles"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": { "const": "1.0.0" },
+    "lanes": {
+      "type": "object",
+      "required": ["sol", "terra", "luna"],
+      "additionalProperties": false,
+      "properties": {
+        "sol": { "$ref": "#/$defs/solLane" },
+        "terra": { "$ref": "#/$defs/terraLane" },
+        "luna": { "$ref": "#/$defs/lunaLane" }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/role" }
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/target" }
+    }
+  },
+  "$defs": {
+    "solLane": {
+      "type": "object",
+      "required": ["class", "reasoning"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "judgment" },
+        "reasoning": { "const": "high" }
+      }
+    },
+    "terraLane": {
+      "type": "object",
+      "required": ["class", "reasoning"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "implementation" },
+        "reasoning": { "const": "medium" }
+      }
+    },
+    "lunaLane": {
+      "type": "object",
+      "required": ["class", "reasoning"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "bounded-retrieval" },
+        "reasoning": { "const": "low" }
+      }
+    },
+    "role": {
+      "type": "object",
+      "required": ["lane", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "lane": { "enum": ["sol", "terra", "luna"] },
+        "provenance": { "type": "string", "minLength": 1 }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["lanes"],
+      "additionalProperties": false,
+      "properties": {
+        "lanes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sol": { "$ref": "#/$defs/modelBinding" },
+            "terra": { "$ref": "#/$defs/modelBinding" },
+            "luna": { "$ref": "#/$defs/modelBinding" }
+          }
+        }
+      }
+    },
+    "modelBinding": {
+      "type": "object",
+      "required": ["model", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "provenance": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
