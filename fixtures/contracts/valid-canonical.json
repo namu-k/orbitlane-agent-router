@@ -1,0 +1,13 @@
+{
+  "contract_version": "1.0.0",
+  "lanes": {
+    "sol": { "class": "judgment", "reasoning": "high" },
+    "terra": { "class": "implementation", "reasoning": "medium" },
+    "luna": { "class": "bounded-retrieval", "reasoning": "low" }
+  },
+  "roles": {
+    "architect": { "lane": "sol", "provenance": "user-approved" },
+    "executor": { "lane": "terra", "provenance": "user-approved" },
+    "explore": { "lane": "luna", "provenance": "user-approved" }
+  }
+}

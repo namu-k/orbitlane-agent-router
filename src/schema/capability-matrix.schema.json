@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitlane.dev/schema/capability-matrix-1.0.0.json",
+  "title": "OrbitLane adapter capability matrix",
+  "type": "object",
+  "required": ["adapter", "reasoning"],
+  "additionalProperties": false,
+  "properties": {
+    "adapter": { "const": "claude" },
+    "reasoning": {
+      "type": "object",
+      "required": ["effort", "thinking", "effective"],
+      "additionalProperties": false,
+      "properties": {
+        "effort": { "const": "supported" },
+        "thinking": { "const": "session-inherited" },
+        "effective": { "const": "unproven" }
+      }
+    }
+  }
+}
