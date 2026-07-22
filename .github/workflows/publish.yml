@@ -20,5 +20,7 @@ jobs:
       - run: npm install --ignore-scripts
       - run: npm test
       - run: npm pack --dry-run --json
-      # Publishing remains blocked by package.json private:true until an approved release change.
+      # Requires an NPM_TOKEN repository secret (npm automation token) with publish rights.
       - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

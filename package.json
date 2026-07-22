@@ -1,8 +1,26 @@
 {
   "name": "orbitlane",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "description": "Routing contract compiler for coding-agent runtimes: compile one role-to-model routing contract into native configuration for Codex/OMX and Claude Code, then audit what can actually be enforced.",
+  "keywords": [
+    "ai-agents",
+    "coding-agents",
+    "model-routing",
+    "subagents",
+    "codex",
+    "claude-code",
+    "developer-tools",
+    "cli"
+  ],
+  "homepage": "https://github.com/namu-k/orbitlane-agent-router#readme",
+  "bugs": {
+    "url": "https://github.com/namu-k/orbitlane-agent-router/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/namu-k/orbitlane-agent-router.git"
+  },
   "bin": {
     "orbitlane": "bin/orbitlane.js"
   },

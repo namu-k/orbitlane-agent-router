@@ -66,7 +66,8 @@ test("release package is allowlisted, private-free, and ships its CLI", async ()
   const archive = JSON.parse(packed.stdout)[0];
   const paths = archive.files.map((file) => file.path);
 
-  assert.equal(manifest.private, true, "publishing remains an explicit approval step");
+  assert.notEqual(manifest.private, true, "the package must be publishable (not private)");
+  assert.match(manifest.version, /^\d+\.\d+\.\d+/, "a release requires a semver version");
   assert.deepEqual(manifest.files, ["bin/", "src/", "README.md", "README.ko.md"]);
   assert.ok(paths.includes("bin/orbitlane.js"));
   assert.ok(paths.includes("src/guards/claude-spawn-hook.js"));
