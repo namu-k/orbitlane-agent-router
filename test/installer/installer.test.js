@@ -274,17 +274,21 @@ test("preserves user file permissions through install, rollback, and uninstall",
   const codex = adapter(directory, "codex");
   await writeFile(codex.instructionPath, "before\n");
   await chmod(codex.instructionPath, 0o600);
+  // Assert preservation against the mode the OS actually stored: Windows does not
+  // honor Unix permission bits (reads back 0o666), so compare to the baseline
+  // rather than a hard-coded value to keep this portable across all three OSes.
+  const preserved = (await stat(codex.instructionPath)).mode & 0o777;
 
   await installRouting(contract, { target: "codex", adapters: { codex } });
-  assert.equal((await stat(codex.instructionPath)).mode & 0o777, 0o600);
+  assert.equal((await stat(codex.instructionPath)).mode & 0o777, preserved);
   await uninstallRouting({ target: "codex", adapters: { codex } });
-  assert.equal((await stat(codex.instructionPath)).mode & 0o777, 0o600);
+  assert.equal((await stat(codex.instructionPath)).mode & 0o777, preserved);
   await installRouting(contract, {
     target: "codex",
     adapters: { codex },
     hooks: { interruptAfterInstructionCommit: true },
   });
-  assert.equal((await stat(codex.instructionPath)).mode & 0o777, 0o600);
+  assert.equal((await stat(codex.instructionPath)).mode & 0o777, preserved);
 });
 
 test("recovers a persisted target manifest after an interrupted first replacement", async (t) => {
