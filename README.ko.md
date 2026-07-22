@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-> **상태: 공개 전 설계 단계.** OrbitLane은 아직 npm에 배포되지 않았습니다. 아래 명령과 런타임 adapter는 현재 사용할 수 있는 기능이 아니라 계획된 v1 인터페이스입니다.
+> **상태: 공개 전 구현 단계.** OrbitLane은 로컬에서 구현되었지만 아직 npm에 배포되지 않았습니다. 아래 CLI와 adapter는 공개된 패키지 또는 모든 runtime 경로의 enforcement를 주장하지 않습니다.
 
 OrbitLane은 하나의 역할-모델 라우팅 계약을 Codex/OMX와 Claude Code의 네이티브 설정으로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 계약 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 Claude Code에 한정된 spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 
@@ -22,15 +22,15 @@ OrbitLane은 라우팅 정책을 명시적이고 이식 가능하게 만듭니�
 - configuration 적용과 runtime enforcement를 분리해 감사합니다.
 - 지원되지 않는 capability는 성공으로 가장하지 않고 `false` 또는 `unproven`으로 보고합니다.
 
-## 계획된 빠른 시작
+## 공개 후 빠른 시작
 
-목표 설치 UX는 하나의 대화형 명령입니다.
+package는 하나의 명령으로 CLI를 제공합니다.
 
 ```bash
-npx orbitlane
+npx orbitlane --help
 ```
 
-설치할 adapter를 선택합니다.
+이 공개 전 버전에는 대화형 선택기가 없으며 설치에는 contract 경로가 필요합니다.
 
 ```text
 ? OrbitLane 라우팅 설정을 어디에 설치할까요?
@@ -39,15 +39,15 @@ npx orbitlane
   Both
 ```
 
-CI와 dotfile 자동화를 위한 계획된 비대화형 명령은 다음과 같습니다.
+CI와 dotfile 자동화를 위한 비대화형 명령은 다음과 같습니다.
 
 ```bash
-npx orbitlane install --target codex
-npx orbitlane install --target claude
-npx orbitlane install --target both
+npx orbitlane install --target codex --contract <path>
+npx orbitlane install --target claude --contract <path>
+npx orbitlane install --target both --contract <path>
 ```
 
-전역 package 설치나 WSL 전용 설정은 요구하지 않을 계획입니다.
+전역 package 설치나 WSL 전용 설정은 요구하지 않습니다.
 
 ## 코딩 에이전트 모델 라우팅의 작동 방식
 

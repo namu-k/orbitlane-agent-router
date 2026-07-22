@@ -99,8 +99,8 @@ async function terminalFailure(code, diff, cause, manifest, phase, errors = []) 
 }
 
 function runtimeFailure(adapter) {
-  if (!adapter?.runtime?.available) return "TARGET_RUNTIME_MISSING";
-  if (typeof adapter.supportsVersion !== "function" || !adapter.supportsVersion(adapter.runtime.version)) return "TARGET_RUNTIME_UNSUPPORTED";
+  if (!adapter || adapter.runtime?.available === false) return "TARGET_RUNTIME_MISSING";
+  if (adapter.runtime?.available === true && (typeof adapter.supportsVersion !== "function" || !adapter.supportsVersion(adapter.runtime.version))) return "TARGET_RUNTIME_UNSUPPORTED";
   return null;
 }
 
@@ -278,6 +278,31 @@ async function uninstallOne(target, adapter, hooks) {
       if (settings !== null) await replaceStaged(join(transactionPath, "settings.stage"), settings.path);
     },
   });
+}
+
+async function previewOne(contract, target, adapter) {
+  try {
+    const runtime = runtimeFailure(adapter);
+    if (runtime) return failure(runtime, null);
+    const [instruction, generated, settings] = await Promise.all([
+      snapshot(adapter.instructionPath),
+      snapshot(adapter.generatedPath),
+      adapter.settingsPath === undefined ? Promise.resolve(null) : snapshot(adapter.settingsPath),
+    ]);
+    return Object.freeze({
+      status: "planned",
+      diff: installDiff(target, instruction, generated, settings, adapter.render(contract)),
+      manifest: null,
+    });
+  } catch (error) {
+    return failure(error.code ?? "INSTALL_FAILED", null, error);
+  }
+}
+
+export async function previewRouting(contract, { target, adapters }) {
+  const outcomes = {};
+  for (const name of targetList(target)) outcomes[name] = await previewOne(contract, name, adapters?.[name]);
+  return Object.freeze({ outcomes: Object.freeze(outcomes) });
 }
 
 export async function installRouting(contract, { target, adapters, hooks = {} }) {

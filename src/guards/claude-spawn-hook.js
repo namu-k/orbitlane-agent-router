@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 
 import { runClaudeSpawnGuard } from "./claude-spawn.js";
 
-const [contractPath, evidencePath, runtimeDefaultsPath] = process.argv.slice(2);
+const decodeArgument = (value) => typeof value === "string" && value.startsWith("base64:")
+  ? Buffer.from(value.slice("base64:".length), "base64").toString("utf8")
+  : value;
+const [contractPath, evidencePath, runtimeDefaultsPath] = process.argv.slice(2).map(decodeArgument);
 const input = await new Promise((resolve, reject) => {
   let body = "";
   process.stdin.setEncoding("utf8");

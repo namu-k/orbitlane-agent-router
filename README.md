@@ -2,7 +2,7 @@
 
 [한국어](README.ko.md)
 
-> **Status: pre-release design.** OrbitLane is not published to npm yet. Commands and runtime adapters shown below describe the planned v1 interface, not currently available software.
+> **Status: pre-release implementation.** OrbitLane is implemented locally but is not published to npm yet. The CLI and adapters below are not a claim of a published package or universal runtime enforcement.
 
 OrbitLane is an open-source **routing contract compiler** that compiles one role-to-model routing contract into runtime-native configuration for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and a Claude Code-scoped spawn guard. A general-purpose runtime model router is the Tier 2 roadmap.
 
@@ -22,15 +22,15 @@ OrbitLane makes the routing policy explicit and portable:
 - Audit configuration separately from runtime enforcement.
 - Report unsupported capabilities as `false` or `unproven`, never as implied success.
 
-## Planned quick start
+## Quick start after publication
 
-The intended installation UX is one interactive command:
+The package exposes its CLI with one command:
 
 ```bash
-npx orbitlane
+npx orbitlane --help
 ```
 
-The installer will ask which adapters to configure:
+An interactive selector is not included in this pre-release; a contract path is required for installation:
 
 ```text
 ? Where should OrbitLane install routing configuration?
@@ -39,15 +39,15 @@ The installer will ask which adapters to configure:
   Both
 ```
 
-Planned non-interactive forms for CI and dotfile automation:
+Non-interactive forms for CI and dotfile automation:
 
 ```bash
-npx orbitlane install --target codex
-npx orbitlane install --target claude
-npx orbitlane install --target both
+npx orbitlane install --target codex --contract <path>
+npx orbitlane install --target claude --contract <path>
+npx orbitlane install --target both --contract <path>
 ```
 
-No global package installation and no WSL-specific setup are planned.
+No global package installation or WSL-specific setup is required.
 
 ## How coding-agent model routing works
 

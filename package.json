@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "orbitlane": "bin/orbitlane.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "README.ko.md"
+  ],
   "scripts": {
     "test": "node --test"
   },
