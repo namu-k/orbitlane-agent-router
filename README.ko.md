@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-> **상태: 공개 전 구현 단계.** OrbitLane은 로컬에서 구현되었지만 아직 npm에 배포되지 않았습니다. 아래 CLI와 adapter는 공개된 패키지 또는 모든 runtime 경로의 enforcement를 주장하지 않습니다.
+> **상태: v0.1.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
 
 OrbitLane은 하나의 역할-모델 라우팅 계약을 Codex/OMX와 Claude Code의 네이티브 설정으로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 계약 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 Claude Code에 한정된 spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 
@@ -22,7 +22,7 @@ OrbitLane은 라우팅 정책을 명시적이고 이식 가능하게 만듭니�
 - configuration 적용과 runtime enforcement를 분리해 감사합니다.
 - 지원되지 않는 capability는 성공으로 가장하지 않고 `false` 또는 `unproven`으로 보고합니다.
 
-## 공개 후 빠른 시작
+## 빠른 시작
 
 package는 하나의 명령으로 CLI를 제공합니다.
 
@@ -30,7 +30,7 @@ package는 하나의 명령으로 CLI를 제공합니다.
 npx orbitlane --help
 ```
 
-이 공개 전 버전에는 대화형 선택기가 없으며 설치에는 contract 경로가 필요합니다.
+아직 대화형 선택기가 없으며 설치에는 contract 경로가 필요합니다.
 
 ```text
 ? OrbitLane 라우팅 설정을 어디에 설치할까요?
@@ -218,18 +218,19 @@ v1에는 telemetry를 넣지 않을 계획입니다.
 ## Roadmap
 
 - [x] 공개 positioning과 enforcement vocabulary 정의.
-- [ ] Canonical contract schema와 fixture 공개.
-- [ ] 기존 내용을 보존하는 installer 구현.
-- [ ] Codex/OMX Tier 1 adapter 구현 및 검증.
-- [ ] Claude Code adapter 구현 및 검증.
-- [ ] Cross-platform integration test 추가.
-- [ ] npm package 및 서명된 release artifact 배포.
+- [x] Canonical contract schema와 fixture 공개.
+- [x] 기존 내용을 보존하는 installer 구현.
+- [x] Codex/OMX Tier 1 adapter 구현 및 검증.
+- [x] Claude Code adapter 구현 및 검증.
+- [x] Cross-platform integration test 추가.
+- [x] npm package(`orbitlane`) 배포.
+- [ ] Release artifact 서명.
 - [ ] OpenCode native agent/plugin API에 대한 adapter 평가.
 - [ ] 모든 capability gate를 통과한 adapter만 Tier 2로 승격.
 
 ## 프로젝트 상태
 
-OrbitLane은 현재 공개 설계 단계입니다. 아직 배포된 CLI나 production adapter가 없습니다. 초기 review는 contract, claim boundary, adapter interface와 cross-platform 설치 동작에 집중해야 합니다.
+OrbitLane v0.1.0이 Tier 1 CLI로 npm에 배포되었습니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code adapter, Claude Code scoped spawn guard. Review는 contract, claim boundary, adapter interface와 cross-platform 설치 동작에 집중해야 합니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
 
 ## 설계 문서
 

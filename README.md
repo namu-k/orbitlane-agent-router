@@ -2,7 +2,7 @@
 
 [한국어](README.ko.md)
 
-> **Status: pre-release implementation.** OrbitLane is implemented locally but is not published to npm yet. The CLI and adapters below are not a claim of a published package or universal runtime enforcement.
+> **Status: v0.1.0 is published to npm.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
 
 OrbitLane is an open-source **routing contract compiler** that compiles one role-to-model routing contract into runtime-native configuration for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and a Claude Code-scoped spawn guard. A general-purpose runtime model router is the Tier 2 roadmap.
 
@@ -22,7 +22,7 @@ OrbitLane makes the routing policy explicit and portable:
 - Audit configuration separately from runtime enforcement.
 - Report unsupported capabilities as `false` or `unproven`, never as implied success.
 
-## Quick start after publication
+## Quick start
 
 The package exposes its CLI with one command:
 
@@ -30,7 +30,7 @@ The package exposes its CLI with one command:
 npx orbitlane --help
 ```
 
-An interactive selector is not included in this pre-release; a contract path is required for installation:
+An interactive selector is not included yet; a contract path is required for installation:
 
 ```text
 ? Where should OrbitLane install routing configuration?
@@ -218,18 +218,19 @@ No. The installer is designed to own only a clearly marked routing block and pre
 ## Roadmap
 
 - [x] Define the public positioning and enforcement vocabulary.
-- [ ] Publish the canonical contract schema and fixtures.
-- [ ] Build the merge-preserving installer.
-- [ ] Implement and verify the Codex/OMX Tier 1 adapter.
-- [ ] Implement and verify the Claude Code adapter.
-- [ ] Add cross-platform integration tests.
-- [ ] Publish the npm package and signed release artifacts.
+- [x] Publish the canonical contract schema and fixtures.
+- [x] Build the merge-preserving installer.
+- [x] Implement and verify the Codex/OMX Tier 1 adapter.
+- [x] Implement and verify the Claude Code adapter.
+- [x] Add cross-platform integration tests.
+- [x] Publish the npm package (`orbitlane`).
+- [ ] Sign release artifacts.
 - [ ] Evaluate an OpenCode adapter against its native agent and plugin APIs.
 - [ ] Promote an adapter to Tier 2 only after all capability gates pass.
 
 ## Project status
 
-OrbitLane is currently being designed in public. The repository does not yet contain a released CLI or production adapter. Early review should focus on the contract, claim boundaries, adapter interfaces, and cross-platform installation behavior.
+OrbitLane v0.1.0 is published to npm as a Tier 1 CLI: contract compilation, a merge-preserving installer, Codex/OMX and Claude Code adapters, and a Claude Code-scoped spawn guard. Review should focus on the contract, claim boundaries, adapter interfaces, and cross-platform installation behavior. Universal runtime enforcement remains the Tier 2 roadmap.
 
 ## Design documentation
 

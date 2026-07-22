@@ -93,15 +93,15 @@ test("public-safety scanner rejects representative private, artifact, and premat
   assert.notDeepEqual(publicSafetyIssues("README.md", ["orbitlane", "agent", "router", "t2"].join("-")), []);
 });
 
-test("README status is consistently pre-publish and bounded to Tier 1 plus scoped guard", async () => {
+test("README status is consistently post-publish and bounded to Tier 1 plus scoped guard", async () => {
   const [english, korean] = await Promise.all([readFile(resolve(root, "README.md"), "utf8"), readFile(resolve(root, "README.ko.md"), "utf8")]);
-  assert.match(english, /pre-release implementation/i);
-  assert.match(korean, /공개 전 구현 단계/);
+  assert.match(english, /published to npm/i);
+  assert.match(korean, /npm에 공개/);
   for (const text of [english, korean]) {
     assert.match(text, /Tier 2 roadmap/i);
     assert.match(text, /scoped/i);
   }
-  assert.match(english, /not a claim of a published package or universal runtime enforcement/i);
+  assert.match(english, /not a claim of universal runtime enforcement/i);
   assert.match(english, /npx orbitlane install --target codex --contract <path>/);
   assert.match(korean, /npx orbitlane install --target codex --contract <path>/);
 });
