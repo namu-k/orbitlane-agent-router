@@ -1,0 +1,7 @@
+{
+  "native_role_configuration": { "status": "unproven", "scope": "no-native-format-generated" },
+  "requested_route": { "status": "configured", "scope": "static-projection" },
+  "runtime_receipt": { "status": "unproven" },
+  "spawn_link": { "status": "unproven" },
+  "effective_model": "unproven"
+}
