@@ -147,6 +147,10 @@ export function auditInstalledRoles(contract, installedRoles, { strict = false }
   };
 }
 
+export function canonicalLanes() {
+  return structuredClone(CANONICAL_LANES);
+}
+
 export function claudeCapabilityMatrix() {
   return structuredClone(CLAUDE_REASONING_CAPABILITY);
 }
