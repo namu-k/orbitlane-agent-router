@@ -13,6 +13,7 @@ const CLAUDE_REASONING_CAPABILITY = Object.freeze({
 });
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const ROLE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 
 const addUnexpectedKeys = (value, allowedKeys, path, errors) => {
   for (const key of Object.keys(value)) {
@@ -77,6 +78,7 @@ function validateRoles(roles, errors) {
 
   for (const [roleName, role] of Object.entries(roles)) {
     const path = `roles.${roleName}`;
+    if (!ROLE_NAME.test(roleName)) errors.push(`${path} must match ${ROLE_NAME}`);
     if (!isRecord(role)) {
       errors.push(`${path} must be an object`);
       continue;

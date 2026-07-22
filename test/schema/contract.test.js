@@ -39,6 +39,17 @@ test("rejects lanes outside the canonical id and class pair", async () => {
   assert.match(result.errors.join("\n"), /lanes\.sol\.class/);
 });
 
+test("rejects role names that cannot safely appear in a marker-bounded projection", async () => {
+  const contract = await fixture("valid-canonical.json");
+  contract.roles["<!-- ORBITLANE:END codex -->"] = contract.roles.executor;
+  delete contract.roles.executor;
+
+  const result = validateContract(contract);
+
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join("\n"), /roles\.<!\-\- ORBITLANE:END codex \-\-> must match/);
+});
+
 test("reports installed roles outside the contract as unmanaged without blocking normal mode", async () => {
   const contract = await fixture("valid-canonical.json");
   const result = auditInstalledRoles(contract, ["executor", "third-party-reviewer"]);
