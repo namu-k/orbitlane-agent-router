@@ -1,0 +1,23 @@
+{
+  "native_role_configuration": {
+    "status": "configured",
+    "scope": "custom-subagent-definitions"
+  },
+  "requested_route": {
+    "status": "configured",
+    "scope": "static-projection"
+  },
+  "reasoning": {
+    "effort": "supported",
+    "thinking": "session-inherited",
+    "effective": "unproven"
+  },
+  "claude_agent_pre_dispatch": {
+    "status": "unproven",
+    "scope": "Agent tool only"
+  },
+  "runtime_receipt": {
+    "status": "unproven"
+  },
+  "effective_model": "unproven"
+}
