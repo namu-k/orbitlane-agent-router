@@ -36,11 +36,12 @@ async function stageSnapshot(transactionPath, name, source) {
   return Object.freeze({ path, hash: source.hash, timestamp: source.timestamp, exists: source.exists, mode: source.mode, targetPath: source.path });
 }
 
-async function createManifest(target, transactionPath, instruction, generated) {
+async function createManifest(target, transactionPath, instruction, generated, settings) {
   await mkdir(transactionPath, { recursive: true });
   const backups = Object.freeze([
     await stageSnapshot(transactionPath, "instruction", instruction),
     await stageSnapshot(transactionPath, "generated", generated),
+    ...(settings === null ? [] : [await stageSnapshot(transactionPath, "settings", settings)]),
   ]);
   return persistManifest(Object.freeze({ version: 1, target, path: join(transactionPath, "manifest.json"), phase: "prepared", backups }));
 }
@@ -103,7 +104,32 @@ function runtimeFailure(adapter) {
   return null;
 }
 
-function installDiff(target, instruction, generated, rendered) {
+function previousGuardCommand(content) {
+  try { return JSON.parse(content).settings_projection?.guard_command; } catch { return undefined; }
+}
+
+function mergeSettings(content, command, previousCommand, remove = false) {
+  const settings = content.length === 0 ? {} : JSON.parse(content);
+  const hooks = settings.hooks ?? {};
+  const entries = hooks.PreToolUse ?? [];
+  const ownedCommands = new Set([command, previousCommand].filter((value) => typeof value === "string"));
+  const owned = (hook) => hook?.type === "command" && ownedCommands.has(hook.command);
+  const retained = entries.flatMap((entry) => {
+    if (entry?.matcher !== "Agent" || !Array.isArray(entry.hooks)) return [entry];
+    const next = entry.hooks.filter((hook) => !owned(hook));
+    return next.length === 0 ? [] : [{ ...entry, hooks: next }];
+  });
+  if (remove && retained.length === 0) {
+    const { PreToolUse, ...otherHooks } = hooks;
+    if (Object.keys(otherHooks).length === 0) delete settings.hooks;
+    else settings.hooks = otherHooks;
+  } else {
+    settings.hooks = { ...hooks, PreToolUse: remove ? retained : [...retained, { matcher: "Agent", hooks: [{ type: "command", command }] }] };
+  }
+  return `${JSON.stringify(settings, null, 2)}\n`;
+}
+
+function installDiff(target, instruction, generated, settings, rendered) {
   const replacement = markerBoundedPolicy(target, rendered.policy.endsWith("\n") ? rendered.policy : `${rendered.policy}\n`);
   const instructionAfter = ownedBlockPattern(target).test(instruction.content)
     ? instruction.content.replace(ownedBlockPattern(target), replacement)
@@ -111,22 +137,24 @@ function installDiff(target, instruction, generated, rendered) {
   return Object.freeze({
     instruction: Object.freeze({ path: instruction.path, before: instruction.content, after: instructionAfter }),
     generated: Object.freeze({ path: generated.path, before: generated.content, after: rendered.generated }),
+    settings: settings === null ? null : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, rendered.settingsProjection.command, previousGuardCommand(generated.content)) }),
   });
 }
 
-function uninstallDiff(target, instruction, generated) {
+function uninstallDiff(target, instruction, generated, settings, adapter) {
   return Object.freeze({
     instruction: Object.freeze({ path: instruction.path, before: instruction.content, after: instruction.content.replace(ownedBlockPattern(target), "") }),
     generated: Object.freeze({ path: generated.path, before: generated.content, after: null }),
+    settings: settings === null ? null : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, adapter.spawnGuardCommand, previousGuardCommand(generated.content), true) }),
   });
 }
 
-async function originalsMatch(instruction, generated) {
-  const [currentInstruction, currentGenerated] = await Promise.all([snapshot(instruction.path), snapshot(generated.path)]);
+async function originalsMatch(instruction, generated, settings) {
+  const [currentInstruction, currentGenerated, currentSettings] = await Promise.all([snapshot(instruction.path), snapshot(generated.path), ...(settings === null ? [] : [snapshot(settings.path)])]);
   return currentInstruction.exists === instruction.exists
     && currentGenerated.exists === generated.exists
-    && currentInstruction.hash === instruction.hash
-    && currentGenerated.hash === generated.hash;
+    && currentInstruction.hash === instruction.hash && currentGenerated.hash === generated.hash
+    && (settings === null || (currentSettings.exists === settings.exists && currentSettings.hash === settings.hash));
 }
 
 async function validateStages(stages) {
@@ -143,9 +171,9 @@ async function validateRecoveryManifest(manifest, requestedPath) {
     || !TARGET_NAMES.includes(manifest.target) || typeof manifest.path !== "string"
     || manifest.path !== requestedPath
     || !["prepared", "committing", "completed", "aborted", "rolled_back", "recovered"].includes(manifest.phase)
-    || !Array.isArray(manifest.backups) || manifest.backups.length !== 2) return null;
+    || !Array.isArray(manifest.backups) || ![2, 3].includes(manifest.backups.length)) return null;
   const transactionPath = dirname(manifest.path);
-  const backupNames = ["instruction", "generated"];
+  const backupNames = manifest.backups.length === 3 ? ["instruction", "generated", "settings"] : ["instruction", "generated"];
   const backupContents = [];
   for (const [index, backup] of manifest.backups.entries()) {
     if (backup === null || typeof backup !== "object" || typeof backup.path !== "string"
@@ -171,23 +199,24 @@ async function runTarget(target, adapter, hooks, operation) {
     if (runtime) return failure(runtime, null);
     const instruction = await snapshot(adapter.instructionPath);
     const generated = await snapshot(adapter.generatedPath);
-    diff = await operation.plan(instruction, generated);
-    if (operation.isUnchanged(diff, generated)) return Object.freeze({ status: "unchanged", diff, manifest: null });
+    const settings = adapter.settingsPath === undefined ? null : await snapshot(adapter.settingsPath);
+    diff = await operation.plan(instruction, generated, settings);
+    if (operation.isUnchanged(diff, generated, settings)) return Object.freeze({ status: "unchanged", diff, manifest: null });
     transactionPath = join(dirname(adapter.instructionPath), `.orbitlane-${target}-${randomUUID()}`);
-    manifest = await createManifest(target, transactionPath, instruction, generated);
-    await Promise.all([mkdir(dirname(instruction.path), { recursive: true }), mkdir(dirname(generated.path), { recursive: true })]);
-    await operation.stage(transactionPath, diff, instruction, generated);
+    manifest = await createManifest(target, transactionPath, instruction, generated, settings);
+    await Promise.all([mkdir(dirname(instruction.path), { recursive: true }), mkdir(dirname(generated.path), { recursive: true }), ...(settings === null ? [] : [mkdir(dirname(settings.path), { recursive: true })])]);
+    await operation.stage(transactionPath, diff, instruction, generated, settings);
     const stages = operation.stages(transactionPath, diff, generated);
     await hooks.afterStage?.({ target, manifest, diff });
     if (!await validateStages(stages)) return terminalFailure("STAGED_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
     await hooks.beforeCommit?.({ target, manifest, diff });
     if (!await validateStages(stages)) return terminalFailure("STAGED_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
-    if (!await originalsMatch(instruction, generated)) return terminalFailure("TARGET_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
+    if (!await originalsMatch(instruction, generated, settings)) return terminalFailure("TARGET_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
     manifest = await persistManifest({ ...manifest, phase: "committing" });
     if (!await validateStages(stages)) return terminalFailure("STAGED_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
-    if (!await originalsMatch(instruction, generated)) return terminalFailure("TARGET_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
+    if (!await originalsMatch(instruction, generated, settings)) return terminalFailure("TARGET_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
     commitStarted = true;
-    await operation.commit(transactionPath, diff, instruction, generated, adapter, stages);
+    await operation.commit(transactionPath, diff, instruction, generated, settings, adapter, stages);
     manifest = await persistManifest({ ...manifest, phase: "completed" });
     return Object.freeze({ status: operation.status, diff, manifest });
   } catch (error) {
@@ -204,22 +233,25 @@ async function runTarget(target, adapter, hooks, operation) {
 async function installOne(contract, target, adapter, hooks) {
   return runTarget(target, adapter, hooks, {
     status: "installed",
-    plan: (instruction, generated) => installDiff(target, instruction, generated, adapter.render(contract)),
-    isUnchanged: (diff, generated) => diff.instruction.before === diff.instruction.after && generated.exists && diff.generated.before === diff.generated.after,
-    stage: async (transactionPath, diff, instruction, generated) => {
+    plan: (instruction, generated, settings) => installDiff(target, instruction, generated, settings, adapter.render(contract)),
+    isUnchanged: (diff, generated, settings) => diff.instruction.before === diff.instruction.after && generated.exists && diff.generated.before === diff.generated.after && (settings === null || diff.settings.before === diff.settings.after),
+    stage: async (transactionPath, diff, instruction, generated, settings) => {
       await writeStaged(join(transactionPath, "instruction.stage"), diff.instruction.after, instruction.mode);
       await writeStaged(join(transactionPath, "generated.stage"), diff.generated.after, generated.mode);
+      if (settings !== null) await writeStaged(join(transactionPath, "settings.stage"), diff.settings.after, settings.mode);
     },
     stages: (transactionPath, diff) => Object.freeze([
       Object.freeze({ path: join(transactionPath, "instruction.stage"), hash: sha256(diff.instruction.after) }),
       Object.freeze({ path: join(transactionPath, "generated.stage"), hash: sha256(diff.generated.after) }),
+      ...(diff.settings === null ? [] : [Object.freeze({ path: join(transactionPath, "settings.stage"), hash: sha256(diff.settings.after) })]),
     ]),
-    commit: async (transactionPath, diff, instruction, generated, targetAdapter) => {
+    commit: async (transactionPath, diff, instruction, generated, settings, targetAdapter) => {
       await replaceStaged(join(transactionPath, "instruction.stage"), instruction.path);
       if (targetAdapter.failurePoint === "terminateAfterInstructionCommit") process.kill(process.pid, "SIGKILL");
       if (targetAdapter.failurePoint === "leaveAfterInstructionCommit") throw Object.assign(new Error("interrupted for recovery"), { code: "INTERRUPTED_FOR_RECOVERY" });
       if (targetAdapter.failurePoint === "afterInstructionCommit" || hooks.interruptAfterInstructionCommit) throw Object.assign(new Error("interrupted"), { code: "INSTALL_INTERRUPTED" });
       await replaceStaged(join(transactionPath, "generated.stage"), generated.path);
+      if (settings !== null) await replaceStaged(join(transactionPath, "settings.stage"), settings.path);
     },
   });
 }
@@ -227,20 +259,23 @@ async function installOne(contract, target, adapter, hooks) {
 async function uninstallOne(target, adapter, hooks) {
   return runTarget(target, adapter, hooks, {
     status: "uninstalled",
-    plan: (instruction, generated) => uninstallDiff(target, instruction, generated),
-    isUnchanged: (diff, generated) => diff.instruction.before === diff.instruction.after && !generated.exists,
-    stage: async (transactionPath, diff, instruction, generated) => {
+    plan: (instruction, generated, settings) => uninstallDiff(target, instruction, generated, settings, { ...adapter, spawnGuardCommand: adapter.spawnGuardCommand ?? adapter.render().settingsProjection?.command }),
+    isUnchanged: (diff, generated, settings) => diff.instruction.before === diff.instruction.after && !generated.exists && (settings === null || diff.settings.before === diff.settings.after),
+    stage: async (transactionPath, diff, instruction, generated, settings) => {
       await writeStaged(join(transactionPath, "instruction.stage"), diff.instruction.after, instruction.mode);
       if (generated.exists) await writeStaged(join(transactionPath, "generated.stage"), generated.content, generated.mode);
+      if (settings !== null) await writeStaged(join(transactionPath, "settings.stage"), diff.settings.after, settings.mode);
     },
     stages: (transactionPath, diff, generated) => Object.freeze([
       Object.freeze({ path: join(transactionPath, "instruction.stage"), hash: sha256(diff.instruction.after) }),
       ...(generated.exists ? [Object.freeze({ path: join(transactionPath, "generated.stage"), hash: sha256(generated.content) })] : []),
+      ...(diff.settings === null ? [] : [Object.freeze({ path: join(transactionPath, "settings.stage"), hash: sha256(diff.settings.after) })]),
     ]),
-    commit: async (transactionPath, diff, instruction, generated, targetAdapter) => {
+    commit: async (transactionPath, diff, instruction, generated, settings, targetAdapter) => {
       await replaceStaged(join(transactionPath, "instruction.stage"), instruction.path);
       if (targetAdapter.failurePoint === "afterInstructionCommit" || hooks.interruptAfterInstructionCommit) throw Object.assign(new Error("interrupted"), { code: "UNINSTALL_INTERRUPTED" });
       if (generated.exists) await rename(generated.path, join(transactionPath, "generated.removed"));
+      if (settings !== null) await replaceStaged(join(transactionPath, "settings.stage"), settings.path);
     },
   });
 }

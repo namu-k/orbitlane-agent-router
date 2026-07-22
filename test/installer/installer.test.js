@@ -86,6 +86,61 @@ test("uninstall removes only owned files and preserves user edits made after ins
   await assert.rejects(access(codex.generatedPath));
 });
 
+test("installs and surgically removes a Claude Agent PreToolUse hook without replacing user settings", async (t) => {
+  const directory = await fixture(t);
+  const settingsPath = join(directory, "settings.json");
+  const claude = adapter(directory, "claude", {
+    settingsPath,
+    render: () => ({
+      policy: "claude policy",
+      generated: '{"target":"claude"}',
+      settingsProjection: { command: "node orbitlane-guard.mjs contract.json evidence.json defaults.json" },
+    }),
+  });
+  await writeFile(settingsPath, `${JSON.stringify({ permissions: { allow: ["Read"] }, hooks: { PreToolUse: [{ matcher: "Write", hooks: [{ type: "command", command: "user-hook" }] }] } }, null, 2)}\n`);
+
+  const installed = await installRouting(contract, { target: "claude", adapters: { claude } });
+  const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+  assert.equal(installed.outcomes.claude.status, "installed");
+  assert.deepEqual(settings.permissions, { allow: ["Read"] });
+  assert.deepEqual(settings.hooks.PreToolUse, [
+    { matcher: "Write", hooks: [{ type: "command", command: "user-hook" }] },
+    { matcher: "Agent", hooks: [{ type: "command", command: "node orbitlane-guard.mjs contract.json evidence.json defaults.json" }] },
+  ]);
+
+  await uninstallRouting({ target: "claude", adapters: { claude } });
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, "utf8")), { permissions: { allow: ["Read"] }, hooks: { PreToolUse: [{ matcher: "Write", hooks: [{ type: "command", command: "user-hook" }] }] } });
+});
+
+test("preserves a user hook in an OrbitLane Agent entry and replaces an older guard command", async (t) => {
+  const directory = await fixture(t);
+  const settingsPath = join(directory, "settings.json");
+  const first = adapter(directory, "claude", { settingsPath, spawnGuardCommand: "node orbitlane-guard-v1.mjs" });
+  first.render = () => ({ policy: "claude policy", generated: JSON.stringify({ settings_projection: { guard_command: first.spawnGuardCommand } }), settingsProjection: { command: first.spawnGuardCommand } });
+  await installRouting(contract, { target: "claude", adapters: { claude: first } });
+  const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+  settings.hooks.PreToolUse[0].hooks.push({ type: "command", command: "user-added" });
+  settings.hooks.PreToolUse[0].hooks.push({ type: "command", command: "node user-orbitlane-guard-report.mjs" });
+  await writeFile(settingsPath, `${JSON.stringify(settings)}\n`);
+  const second = adapter(directory, "claude", { settingsPath, spawnGuardCommand: "node orbitlane-guard-v2.mjs" });
+  second.render = () => ({ policy: "claude policy", generated: JSON.stringify({ settings_projection: { guard_command: second.spawnGuardCommand } }), settingsProjection: { command: second.spawnGuardCommand } });
+  await installRouting(contract, { target: "claude", adapters: { claude: second } });
+  const installed = JSON.parse(await readFile(settingsPath, "utf8"));
+  assert.deepEqual(installed.hooks.PreToolUse[0].hooks, [{ type: "command", command: "user-added" }, { type: "command", command: "node user-orbitlane-guard-report.mjs" }]);
+  assert.deepEqual(installed.hooks.PreToolUse[1].hooks, [{ type: "command", command: "node orbitlane-guard-v2.mjs" }]);
+  await uninstallRouting({ target: "claude", adapters: { claude: second } });
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, "utf8")), { hooks: { PreToolUse: [{ matcher: "Agent", hooks: [{ type: "command", command: "user-added" }, { type: "command", command: "node user-orbitlane-guard-report.mjs" }] }] } });
+});
+
+test("removes settings scaffolding created solely for the OrbitLane hook", async (t) => {
+  const directory = await fixture(t);
+  const claude = adapter(directory, "claude", { settingsPath: join(directory, "settings.json"), spawnGuardCommand: "node orbitlane-guard.mjs" });
+  claude.render = () => ({ policy: "claude policy", generated: "{}", settingsProjection: { command: claude.spawnGuardCommand } });
+  await installRouting(contract, { target: "claude", adapters: { claude } });
+  await uninstallRouting({ target: "claude", adapters: { claude } });
+  assert.deepEqual(JSON.parse(await readFile(claude.settingsPath, "utf8")), {});
+});
+
 test("an interrupted commit restores the target snapshot", async (t) => {
   const directory = await fixture(t);
   const codex = adapter(directory, "codex");

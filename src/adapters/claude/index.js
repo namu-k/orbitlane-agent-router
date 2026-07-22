@@ -115,15 +115,21 @@ export function createClaudeTier1Adapter(contract, options) {
     nativeArtifacts: Object.entries(nativeArtifacts).map(([path, content]) => ({ path, content })),
     expectedRoutes: routes,
   });
+  const settingsProjection = options.spawnGuardCommand === undefined
+    ? Object.freeze({ hooks: Object.freeze({}) })
+    : Object.freeze({ hooks: Object.freeze({ PreToolUse: Object.freeze([{ matcher: "Agent", hooks: Object.freeze([{ type: "command", command: options.spawnGuardCommand }]) }]) }) });
 
   return Object.freeze({
     instructionPath: options.instructionPath,
     generatedPath: options.generatedPath,
+    settingsPath: options.settingsPath,
+    spawnGuardCommand: options.spawnGuardCommand,
     runtime: options.runtime,
     supportsVersion: options.supportsVersion,
     render() {
       return Object.freeze({
         policy: projectPolicy({ target: "claude", contract }),
+        settingsProjection: options.spawnGuardCommand === undefined ? undefined : Object.freeze({ command: options.spawnGuardCommand }),
         generated: `${JSON.stringify({
           adapter: "claude-code",
           tier: "tier1",
@@ -139,7 +145,8 @@ export function createClaudeTier1Adapter(contract, options) {
           }])),
           subagents,
           native_artifacts: nativeArtifacts,
-          settings_projection: Object.freeze({ hooks: Object.freeze({}) }),
+          settings_projection: settingsProjection,
+          ...(options.spawnGuardCommand === undefined ? {} : { settings_projection: { ...settingsProjection, guard_command: options.spawnGuardCommand } }),
           audit,
           capabilities,
           status: "partial enforcement",
