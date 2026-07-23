@@ -37,8 +37,9 @@ async function fixture(t) {
   return { directory, configDir, evidencePath: join(configDir, ".orbitlane", "claude-heartbeats.jsonl") };
 }
 
-async function invoke({ configDir, evidencePath, payload, cwd }) {
-  const child = execFileAsync(process.execPath, [hook, configDir, evidencePath], { cwd, encoding: "utf8" });
+async function invoke({ configDir, evidencePath, payload, cwd, installedScope }) {
+  const args = installedScope === undefined ? [hook, configDir, evidencePath] : [hook, configDir, evidencePath, installedScope];
+  const child = execFileAsync(process.execPath, args, { cwd, encoding: "utf8" });
   child.child.stdin.end(JSON.stringify(payload));
   try {
     const { stdout, stderr } = await child;
@@ -94,4 +95,57 @@ test("an unresolvable report denies and names the scope and report path", async 
   assert.match(result.stderr, /REPORT_UNREADABLE/);
   assert.match(result.stderr, /selected_scope=global/);
   assert.match(result.stderr, /orbitlane install --global/);
+});
+
+test("a project-installed hook whose report is gone points at the project, not the global layer", async (t) => {
+  const { directory, evidencePath } = await fixture(t);
+  const projectRoot = join(directory, "repo");
+  await mkdir(projectRoot, { recursive: true });
+
+  const result = await invoke({
+    configDir: projectRoot,
+    evidencePath,
+    payload: { tool_name: "Agent", tool_input: { subagent_type: "executor", model: "claude-terra" } },
+    cwd: projectRoot,
+    installedScope: "project",
+  });
+
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /REPORT_UNREADABLE/);
+  assert.match(result.stderr, /installed_scope=project/);
+  assert.doesNotMatch(result.stderr, /remedy=reinstall the global layer/);
+  assert.match(result.stderr, /orbitlane install --target claude/);
+});
+
+test("a globally installed hook whose report is gone points at the global layer", async (t) => {
+  const { directory, evidencePath } = await fixture(t);
+
+  const result = await invoke({
+    configDir: join(directory, "missing-config"),
+    evidencePath,
+    payload: { tool_name: "Agent", tool_input: { subagent_type: "executor", model: "claude-terra" } },
+    cwd: directory,
+    installedScope: "global",
+  });
+
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /installed_scope=global/);
+  assert.match(result.stderr, /orbitlane install --global/);
+});
+
+test("a deny names both scopes so the operator knows which contract decided", async (t) => {
+  const { directory, configDir, evidencePath } = await fixture(t);
+
+  const result = await invoke({
+    configDir,
+    evidencePath,
+    payload: { tool_name: "Agent", tool_input: { subagent_type: "executor", model: "other-model" } },
+    cwd: directory,
+    installedScope: "global",
+  });
+
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /CONTRACT_MISMATCH/);
+  assert.match(result.stderr, /selected_scope=/);
+  assert.match(result.stderr, /installed_scope=global/);
 });

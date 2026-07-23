@@ -98,7 +98,7 @@ function adapters(contract, options) {
       }
       result.claude = createClaudeTier1Adapter(contract, {
         ...claudePaths,
-        spawnGuardCommand: guardCommand(process.execPath, join(PACKAGE_ROOT, "src", "guards", "claude-spawn-hook.js"), resolved.claude.root, join(generated, "claude-heartbeats.jsonl")),
+        spawnGuardCommand: guardCommand(process.execPath, join(PACKAGE_ROOT, "src", "guards", "claude-spawn-hook.js"), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
         runtimeDefaults,
         contractSha256: options.contractSha256,
         runtimeDefaultsSha256: options.runtimeDefaultsSha256,

@@ -5,7 +5,13 @@ const decodeArgument = (value) => typeof value === "string" && value.startsWith(
   ? Buffer.from(value.slice("base64:".length), "base64").toString("utf8")
   : value;
 
-const [claudeConfigDir, evidencePath] = process.argv.slice(2).map(decodeArgument);
+const [claudeConfigDir, evidencePath, installedScopeArgument] = process.argv.slice(2).map(decodeArgument);
+
+// Which layer installed this hook. Distinct from the scope the resolver selects at
+// run time: a project hook whose own report is gone falls back to "global" selection
+// but still needs a project reinstall. Absent for hooks installed before this became
+// part of the argument contract.
+const installedScope = installedScopeArgument === "project" || installedScopeArgument === "global" ? installedScopeArgument : undefined;
 
 const input = await new Promise((resolve, reject) => {
   let body = "";
@@ -32,11 +38,12 @@ if (payload !== undefined) {
     try {
       resolved = await resolveEffectiveContract({ cwd: process.cwd(), claudeConfigDir });
     } catch (error) {
-      const scope = error.scope ?? "global";
-      const remedy = scope === "project"
+      const selectedScope = error.scope ?? "global";
+      const remedyScope = selectedScope === "project" || installedScope === "project" ? "project" : "global";
+      const remedy = remedyScope === "project"
         ? "reinstall this project: orbitlane install --target claude --contract <path>"
         : "reinstall the global layer: orbitlane install --global --target claude --contract <path>";
-      process.stderr.write(`${error.code ?? "GUARD_ERROR"} selected_scope=${scope} report_path=${error.reportPath ?? "unknown"} remedy=${remedy}\n`);
+      process.stderr.write(`${error.code ?? "GUARD_ERROR"} selected_scope=${selectedScope} installed_scope=${installedScope ?? "unknown"} report_path=${error.reportPath ?? "unknown"} remedy=${remedy}\n`);
       process.exitCode = 2;
       resolved = undefined;
     }
@@ -52,7 +59,7 @@ if (payload !== undefined) {
         reportPath: resolved.reportPath,
         resolverPolicyVersion: RESOLVER_POLICY_VERSION,
       });
-      if (result.exitCode === 2) process.stderr.write(`${result.reason} selected_scope=${resolved.scope} report_path=${resolved.reportPath}\n`);
+      if (result.exitCode === 2) process.stderr.write(`${result.reason} selected_scope=${resolved.scope} installed_scope=${installedScope ?? "unknown"} report_path=${resolved.reportPath}\n`);
       process.exitCode = result.exitCode;
     }
   }
