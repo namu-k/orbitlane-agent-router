@@ -31,14 +31,23 @@ function vendoredHookPath(root) {
 async function vendorHookRuntime(root) {
   const destination = join(root, ".orbitlane", "hook");
   const staged = join(root, ".orbitlane", `.hook-${randomUUID()}`);
+  const retired = join(root, ".orbitlane", `.hook-retired-${randomUUID()}`);
   try {
     await cp(join(PACKAGE_ROOT, "src"), staged, { recursive: true });
     // The copy leaves the package's module scope behind. Without this the nearest
     // ancestor package.json decides the module type, and in a project that declares
     // CommonJS every import in the hook would fail.
     await writeFile(join(staged, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`, "utf8");
-    await rm(destination, { recursive: true, force: true });
+    // Swap by two renames rather than deleting the live runtime first. The already
+    // installed settings point at this path, so a guard launched during a recursive
+    // delete would find no hook at all; between two renames the gap is a single
+    // directory operation, and an interruption leaves the retired copy recoverable.
+    const replaced = await rename(destination, retired).then(() => true, (error) => {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    });
     await rename(staged, destination);
+    if (replaced) await rm(retired, { recursive: true, force: true }).catch(() => {});
   } catch (error) {
     await rm(staged, { recursive: true, force: true }).catch(() => {});
     throw error;
@@ -89,15 +98,22 @@ async function readJsonIfPossible(path) {
 }
 
 async function receiptAdapters(options) {
-  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot });
   const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
+  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: selected });
   const result = {};
+  // Codex has no guard and no settings file, so `false` keeps uninstallOne from
+  // falling through to `adapter.render()`, which a receipt adapter does not have.
   if (selected.includes("codex")) result.codex = Object.freeze({ ...resolved.codex, spawnGuardCommand: false });
   if (selected.includes("claude")) {
     const report = await readJsonIfPossible(resolved.claude.generatedPath);
     const command = report?.settings_projection?.guard_command;
     const settings = await readJsonIfPossible(resolved.claude.settingsPath);
+    // Ownership must be proven where removal actually happens. mergeSettings only
+    // strips hooks under the Agent matcher, so accepting the command under any
+    // matcher would report a successful uninstall while leaving the entry in place
+    // and deleting the runtime it points at.
     const installed = (settings?.hooks?.PreToolUse ?? [])
+      .filter((entry) => entry?.matcher === "Agent")
       .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
       .some((hook) => hook?.type === "command" && hook.command === command);
     result.claude = typeof command === "string" && command.length > 0 && installed
@@ -108,18 +124,22 @@ async function receiptAdapters(options) {
 }
 
 function adapters(contract, options) {
-  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot });
+  const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
+  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: selected });
   const codexPaths = resolved.codex;
   const claudePaths = resolved.claude;
   const runtimeDefaults = options.runtimeDefaults === undefined ? undefined : options.runtimeDefaults;
   const generated = join(resolved.claude.root, ".orbitlane");
-  const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
   const result = {};
   if (selected.includes("codex")) {
     try { result.codex = createCodexTier1Adapter(contract, { ...codexPaths, runtimeDefaults }); } catch (error) { result.codex = failedAdapter(error, codexPaths); }
   }
   if (selected.includes("claude")) {
     try {
+      // Preparing the Claude side can fail on its own (vendoring, snapshots). Those
+      // failures belong to the Claude target, not to the whole run: --target both
+      // must still install Codex.
+      if (options.claudePreparationError !== undefined) throw options.claudePreparationError;
       result.claude = createClaudeTier1Adapter(contract, {
         ...claudePaths,
         spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
@@ -139,7 +159,11 @@ function adapters(contract, options) {
 // verdict, which has already been committed by the transaction layer.
 async function reclaimDerivedState(options, report) {
   if (report?.outcomes?.claude?.status !== "uninstalled") return;
-  const root = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot }).claude.root;
+  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] });
+  const root = resolved.claude.root;
+  // An install that landed between the uninstall commit and this point owns the
+  // store again. Deleting it would strand the report and settings it just wrote.
+  if (await readJsonIfPossible(resolved.claude.generatedPath) !== undefined) return;
   for (const kind of ["contracts", "runtime-defaults", "hook"]) {
     const path = join(root, ".orbitlane", kind);
     try { await rm(path, { recursive: true, force: true }); } catch (error) {
@@ -172,13 +196,27 @@ async function main() {
   const runtimeDefaultsSource = options.runtimeDefaults === undefined ? undefined : await loadJsonSource(options.runtimeDefaults);
   const contract = contractSource.value;
   const runtimeDefaults = runtimeDefaultsSource?.value;
-  const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot }).claude.root;
-  const persist = options.command === "install" && options.dryRun !== true && (options.target === "claude" || options.target === "both");
+  const claudeSelected = options.target === "claude" || options.target === "both";
+  const persist = options.command === "install" && options.dryRun !== true && claudeSelected;
   const store = persist ? writeSnapshot : (root, kind, content) => planSnapshot(root, kind, content);
-  if (persist) await vendorHookRuntime(claudeRoot);
-  const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
-  const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
-  const targetAdapters = adapters(contract, { ...options, runtimeDefaults, contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 });
+
+  // Everything the Claude target needs before its adapter exists. A failure here is
+  // carried into adapters() as that target's failure so a --target both run still
+  // installs Codex, matching how adapter construction already isolates targets.
+  let prepared = {};
+  try {
+    const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
+    if (persist) await vendorHookRuntime(claudeRoot);
+    const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
+    const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
+    prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 };
+  } catch (error) {
+    if (options.target === "codex") prepared = {};
+    else if (options.target === "claude") throw error;
+    else prepared = { claudePreparationError: error };
+  }
+
+  const targetAdapters = adapters(contract, { ...options, runtimeDefaults, ...prepared });
   if (options.command === "uninstall") return uninstall(options, targetAdapters);
   return options.dryRun ? previewRouting(contract, { target: options.target, adapters: targetAdapters }) : installRouting(contract, { target: options.target, adapters: targetAdapters });
 }

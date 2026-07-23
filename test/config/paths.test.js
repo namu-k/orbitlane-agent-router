@@ -62,3 +62,15 @@ test("global mode refuses a relative runtime home instead of anchoring it to cwd
     );
   }
 });
+
+test("a broken override for one runtime does not fail the other target", () => {
+  const env = { CODEX_HOME: "relative-codex", CLAUDE_CONFIG_DIR: join("/", "custom", "claude") };
+
+  const claudeOnly = resolveTargetPaths({ global: true, env, homedir, targets: ["claude"] });
+  assert.equal(claudeOnly.claude.settingsPath, join("/", "custom", "claude", "settings.json"));
+
+  assert.throws(
+    () => resolveTargetPaths({ global: true, env, homedir, targets: ["codex"] }),
+    (error) => error.code === "GLOBAL_HOME_NOT_ABSOLUTE",
+  );
+});

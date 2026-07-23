@@ -105,3 +105,27 @@ test("global Codex is unaffected by where the package lives", async (t) => {
 
   assert.match(await readFile(join(codexHome, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/);
 });
+
+test("a Claude preparation failure does not stop Codex under --target both", async (t) => {
+  const { contractPath, codexHome, claudeHome, env } = await isolated(t);
+  // A file where the Claude .orbitlane directory has to go: vendoring and the
+  // snapshot store both fail, and only the Claude target may fail with them.
+  await mkdir(claudeHome, { recursive: true });
+  await writeFile(join(claudeHome, ".orbitlane"), "not a directory\n", "utf8");
+
+  const result = await invoke(installedCli, ["install", "--global", "--target", "both", "--contract", contractPath], { env });
+
+  assert.equal(result.code, 1, "one target failed, the other did not");
+  assert.match(await readFile(join(codexHome, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/);
+  await assert.rejects(readFile(join(claudeHome, "CLAUDE.md"), "utf8"));
+});
+
+test("a Claude-only install still fails loudly when preparation fails", async (t) => {
+  const { contractPath, claudeHome, env } = await isolated(t);
+  await mkdir(claudeHome, { recursive: true });
+  await writeFile(join(claudeHome, ".orbitlane"), "not a directory\n", "utf8");
+
+  const result = await invoke(installedCli, ["install", "--global", "--target", "claude", "--contract", contractPath], { env });
+
+  assert.equal(result.code, 2);
+});

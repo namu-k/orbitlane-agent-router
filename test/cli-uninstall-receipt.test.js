@@ -68,3 +68,21 @@ test("uninstalling only codex does not touch the Claude snapshot store", async (
 
   assert.deepEqual(await readdir(join(claudeHome, ".orbitlane", "contracts")), before);
 });
+
+test("a guard command recorded under a different matcher is not treated as owned", async (t) => {
+  const { contractPath, claudeHome, env } = await isolated(t);
+  await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env });
+  const settingsPath = join(claudeHome, "settings.json");
+  const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+  // Ownership is proven where removal happens, and mergeSettings only strips the
+  // Agent matcher. Anything else must fail rather than report a hollow success.
+  settings.hooks.PreToolUse[0].matcher = "Bash";
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+
+  const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout + result.stderr, /RECEIPT_UNVERIFIABLE/);
+  assert.equal(JSON.parse(await readFile(settingsPath, "utf8")).hooks.PreToolUse[0].hooks.length, 1);
+  assert.ok((await readdir(join(claudeHome, ".orbitlane", "hook"))).length > 0, "the runtime must survive a refused uninstall");
+});

@@ -46,7 +46,15 @@ async function nearestProjectReport(start, read) {
 
 export async function resolveEffectiveContract({ cwd, claudeConfigDir, readFile = fsReadFile, realpath = fsRealpath }) {
   let start = cwd;
-  try { start = await realpath(cwd); } catch { start = cwd; }
+  try {
+    start = await realpath(cwd);
+  } catch (error) {
+    // A cwd that simply does not exist is not a report problem, but any other
+    // canonicalisation failure would silently walk the wrong ancestors from a
+    // symlinked directory and could land on the global contract.
+    if (!ABSENT.has(error?.code)) throw fail("CWD_UNRESOLVABLE", `${cwd} (${error?.code ?? "unknown"})`, undefined, undefined);
+    start = cwd;
+  }
 
   const project = await nearestProjectReport(start, readFile);
   const scope = project === undefined ? "global" : "project";
@@ -59,6 +67,9 @@ export async function resolveEffectiveContract({ cwd, claudeConfigDir, readFile 
 
   let report;
   try { report = JSON.parse(raw); } catch { throw fail("REPORT_CORRUPT", reportPath, scope, reportPath); }
+  // `null`, an array or a scalar all parse cleanly. Rejecting them here keeps the
+  // scope and the report path on the error instead of throwing a bare TypeError.
+  if (report === null || typeof report !== "object" || Array.isArray(report)) throw fail("REPORT_CORRUPT", `${reportPath} (not an object)`, scope, reportPath);
 
   if (!SUPPORTED_SCHEMA_VERSIONS.has(report.schema_version)) throw fail("UNSUPPORTED_REPORT_SCHEMA", reportPath, scope, reportPath);
 

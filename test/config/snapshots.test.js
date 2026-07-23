@@ -101,3 +101,18 @@ test("an unknown snapshot kind is rejected", async (t) => {
     (error) => error.code === "UNKNOWN_SNAPSHOT_KIND",
   );
 });
+
+test("an unreadable existing snapshot is never published over", async (t) => {
+  const directory = await root(t);
+  const content = `${JSON.stringify({ a: 1 })}\n`;
+  let wrote = false;
+
+  await assert.rejects(
+    writeSnapshot(directory, "contracts", content, {
+      readFile: async () => { throw Object.assign(new Error("permission denied"), { code: "EACCES" }); },
+      writeFile: async () => { wrote = true; },
+    }),
+    (error) => error.code === "SNAPSHOT_UNREADABLE",
+  );
+  assert.equal(wrote, false, "an unverifiable snapshot must not be overwritten");
+});

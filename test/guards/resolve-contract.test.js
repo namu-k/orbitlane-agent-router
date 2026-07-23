@@ -190,3 +190,34 @@ test("a symlinked cwd canonicalises before the ancestor walk", async (t) => {
   assert.equal(resolved.scope, "project");
   assert.equal(resolved.contractSha256, projectSha);
 });
+
+test("a report that parses to a non-object denies with its scope intact", async (t) => {
+  const directory = await base(t);
+  const globalRoot = join(directory, "home", ".claude");
+  const projectRoot = join(directory, "repo");
+  await installReport(globalRoot, contract);
+  await mkdir(join(projectRoot, ".orbitlane"), { recursive: true });
+
+  for (const body of ["null", "[]", "42", '"text"']) {
+    await writeFile(join(projectRoot, ".orbitlane", "claude-report.json"), `${body}\n`, "utf8");
+    await assert.rejects(
+      resolveEffectiveContract({ cwd: projectRoot, claudeConfigDir: globalRoot }),
+      (error) => error.code === "REPORT_CORRUPT" && error.scope === "project",
+    );
+  }
+});
+
+test("a cwd that cannot be canonicalised denies instead of walking the wrong ancestors", async (t) => {
+  const directory = await base(t);
+  const globalRoot = join(directory, "home", ".claude");
+  await installReport(globalRoot, contract);
+
+  await assert.rejects(
+    resolveEffectiveContract({
+      cwd: join(directory, "repo"),
+      claudeConfigDir: globalRoot,
+      realpath: async () => { throw Object.assign(new Error("io error"), { code: "EIO" }); },
+    }),
+    (error) => error.code === "CWD_UNRESOLVABLE",
+  );
+});

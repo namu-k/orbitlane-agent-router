@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 const KINDS = new Set(["contracts", "runtime-defaults"]);
 const DIGEST = /^[a-f0-9]{64}$/;
+const ABSENT = new Set(["ENOENT", "ENOTDIR"]);
 
 function fail(code, message) {
   return Object.assign(new Error(`${code}: ${message}`), { code });
@@ -29,7 +30,15 @@ export function planSnapshot(root, kind, content) {
 export async function writeSnapshot(root, kind, content, { readFile = fsReadFile, writeFile = fsWriteFile, rename = fsRename } = {}) {
   const planned = planSnapshot(root, kind, content);
   let existing;
-  try { existing = await readFile(planned.path, "utf8"); } catch { existing = undefined; }
+  try {
+    existing = await readFile(planned.path, "utf8");
+  } catch (error) {
+    // Only a genuinely absent snapshot may be written. Treating EACCES or EIO as
+    // absence would publish over bytes we were never able to verify, which is the
+    // one thing an immutable content-addressed store must not do.
+    if (!ABSENT.has(error?.code)) throw fail("SNAPSHOT_UNREADABLE", `${planned.path} (${error?.code ?? "unknown"})`);
+    existing = undefined;
+  }
   if (existing !== undefined) {
     if (snapshotDigest(existing) !== planned.sha256) throw fail("SNAPSHOT_HASH_MISMATCH", planned.path);
     return planned;
