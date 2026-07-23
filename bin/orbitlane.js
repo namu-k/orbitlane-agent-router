@@ -7,6 +7,7 @@ import { createClaudeTier1Adapter } from "../src/adapters/claude/index.js";
 import { createCodexTier1Adapter } from "../src/adapters/codex/index.js";
 import { resolveTargetPaths } from "../src/config/paths.js";
 import { planSnapshot, writeSnapshot } from "../src/config/snapshots.js";
+import { loadJsonSource } from "../src/config/source.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,10 +38,6 @@ function parse(argv) {
   if (command === "install" && typeof options.contract !== "string") throw Object.assign(new TypeError("CONTRACT_REQUIRED"), { code: "CONTRACT_REQUIRED" });
   if (command === "recover" && typeof options.manifest !== "string") throw Object.assign(new TypeError("MANIFEST_REQUIRED"), { code: "MANIFEST_REQUIRED" });
   return Object.freeze({ command, ...options });
-}
-
-async function json(path) {
-  return JSON.parse(await readFile(resolve(path), "utf8"));
 }
 
 function quoteShellArgument(value) {
@@ -125,15 +122,15 @@ async function main() {
   if (options.command === "uninstall" && options.contract === undefined) {
     return uninstallRouting({ target: options.target, adapters: await receiptAdapters(options) });
   }
-  const contract = await json(options.contract);
-  const runtimeDefaults = options.runtimeDefaults === undefined ? undefined : await json(options.runtimeDefaults);
-  const contractBytes = await readFile(resolve(options.contract), "utf8");
-  const runtimeDefaultsBytes = options.runtimeDefaults === undefined ? undefined : await readFile(resolve(options.runtimeDefaults), "utf8");
+  const contractSource = await loadJsonSource(options.contract);
+  const runtimeDefaultsSource = options.runtimeDefaults === undefined ? undefined : await loadJsonSource(options.runtimeDefaults);
+  const contract = contractSource.value;
+  const runtimeDefaults = runtimeDefaultsSource?.value;
   const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot }).claude.root;
   const persist = options.command === "install" && options.dryRun !== true && (options.target === "claude" || options.target === "both");
   const store = persist ? writeSnapshot : (root, kind, content) => planSnapshot(root, kind, content);
-  const contractSnapshot = await store(claudeRoot, "contracts", contractBytes);
-  const runtimeDefaultsSnapshot = runtimeDefaultsBytes === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsBytes);
+  const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
+  const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
   const targetAdapters = adapters(contract, { ...options, runtimeDefaults, contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 });
   if (options.command === "uninstall") return uninstallRouting({ target: options.target, adapters: targetAdapters });
   return options.dryRun ? previewRouting(contract, { target: options.target, adapters: targetAdapters }) : installRouting(contract, { target: options.target, adapters: targetAdapters });
