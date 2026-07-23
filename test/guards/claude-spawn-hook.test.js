@@ -71,6 +71,19 @@ test("a matching Agent spawn is allowed", async (t) => {
   assert.equal(result.code, 0);
 });
 
+test("an unmanaged Agent spawn passes through and is logged", async (t) => {
+  const { directory, configDir, evidencePath } = await fixture(t);
+  const result = await invoke({
+    configDir,
+    evidencePath,
+    payload: { tool_name: "Agent", tool_use_id: "unmanaged-1", tool_input: { subagent_type: "general-purpose", model: "sonnet" } },
+    cwd: directory,
+  });
+  assert.equal(result.code, 0);
+  const { readFile } = await import("node:fs/promises");
+  assert.match(await readFile(evidencePath, "utf8"), /"reason":"UNMANAGED_ROLE"/);
+});
+
 test("a mismatched Agent spawn is denied", async (t) => {
   const { directory, configDir, evidencePath } = await fixture(t);
   const result = await invoke({

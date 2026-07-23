@@ -4,7 +4,8 @@ import { dirname } from "node:path";
 import { resolveClaudeRequestedRoutes } from "../adapters/claude/index.js";
 
 export function evaluateClaudeAgentSpawn({ input, contract, runtimeDefaults }) {
-  if (typeof input?.subagent_type !== "string" || typeof input?.model !== "string") {
+  // Without a role name there is nothing to look up, managed or not.
+  if (typeof input?.subagent_type !== "string") {
     return Object.freeze({ exitCode: 2, decision: "deny", reason: "INVALID_AGENT_TOOL_INPUT", effective_model: "unproven" });
   }
   let routes;
@@ -13,7 +14,15 @@ export function evaluateClaudeAgentSpawn({ input, contract, runtimeDefaults }) {
   }
   const route = routes[input.subagent_type];
   if (route === undefined) {
-    return Object.freeze({ exitCode: 2, decision: "deny", reason: "UNCLASSIFIED_ROLE", effective_model: "unproven" });
+    // The contract does not route this role, so the guard does not govern it. Pass it
+    // through and log it as unmanaged rather than blocking it (spec 9.4). Enforcement
+    // applies only to the roles the contract actually routes; the built-in Claude Code
+    // agent types stay usable.
+    return Object.freeze({ exitCode: 0, decision: "allow", reason: "UNMANAGED_ROLE", effective_model: "unproven" });
+  }
+  // From here the role is managed, so its model must be declared and must match.
+  if (typeof input.model !== "string") {
+    return Object.freeze({ exitCode: 2, decision: "deny", reason: "INVALID_AGENT_TOOL_INPUT", effective_model: "unproven" });
   }
   if ((typeof input.model_override === "string" && input.model_override !== route.model)
     || (typeof input.environment_model === "string" && input.environment_model !== "inherit" && input.environment_model !== route.model)) {
