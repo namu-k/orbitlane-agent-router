@@ -133,6 +133,9 @@ export function createClaudeTier1Adapter(contract, options) {
         generated: `${JSON.stringify({
           adapter: "claude-code",
           tier: "tier1",
+          schema_version: 2,
+          contract_snapshot: { sha256: options.contractSha256 },
+          ...(options.runtimeDefaultsSha256 === undefined ? {} : { runtime_defaults_snapshot: { sha256: options.runtimeDefaultsSha256 } }),
           configuration_enforced: false,
           semantic_policy_audited: true,
           role_binding_enforced: false,
