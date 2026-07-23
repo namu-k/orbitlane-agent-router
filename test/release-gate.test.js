@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
@@ -104,6 +104,13 @@ test("README status is consistently post-publish and bounded to Tier 1 plus scop
   assert.match(english, /not a claim of universal runtime enforcement/i);
   assert.match(english, /npx orbitlane install --target codex --contract <path>/);
   assert.match(korean, /npx orbitlane install --target codex --contract <path>/);
+
+  // The advertised version drifted from package.json once already; pin it.
+  const { version } = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+  for (const text of [english, korean]) assert.match(text, new RegExp(`v${version.replace(/\./g, "\\.")}`), `README must advertise v${version}`);
+
+  const changelog = await readFile(resolve(root, "CHANGELOG.md"), "utf8");
+  assert.match(changelog, new RegExp(`^## ${version.replace(/\./g, "\\.")}$`, "m"), `CHANGELOG must have a section for ${version}`);
 });
 
 test("spawn guard decision p95 remains below the 50ms local budget", () => {
@@ -147,10 +154,13 @@ test("release-gate dry run executes the packed CLI, scoped guard, and rollback l
   assert.match((await runPackageCommand("npx", ["--no-install", "--prefix", directory, "orbitlane", "--help"])).stdout, /Usage: orbitlane/);
   assert.ok(performance.now() - cliStart < 2000, `initial CLI=${performance.now() - cliStart}ms`);
 
-  const contractPath = resolve(directory, "contract.json");
+  const configDir = resolve(directory, "claude-config");
   const evidencePath = resolve(directory, "heartbeat.jsonl");
-  await writeFile(contractPath, `${JSON.stringify(contract)}\n`);
-  await run(process.execPath, [resolve(installedRoot, "src", "guards", "claude-spawn-hook.js"), contractPath, evidencePath], JSON.stringify({ tool_name: "Agent", tool_use_id: "release-gate", tool_input: { subagent_type: "executor", model: "claude-terra" } }));
+  const { writeSnapshot } = await import(pathToFileURL(resolve(installedRoot, "src", "config", "snapshots.js")).href);
+  const snapshot = await writeSnapshot(configDir, "contracts", `${JSON.stringify(contract)}\n`);
+  await mkdir(resolve(configDir, ".orbitlane"), { recursive: true });
+  await writeFile(resolve(configDir, ".orbitlane", "claude-report.json"), `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: snapshot.sha256 } })}\n`);
+  await run(process.execPath, [resolve(installedRoot, "src", "guards", "claude-spawn-hook.js"), configDir, evidencePath], JSON.stringify({ tool_name: "Agent", tool_use_id: "release-gate", tool_input: { subagent_type: "executor", model: "claude-terra" } }));
   assert.match(await readFile(evidencePath, "utf8"), /CONTRACT_MATCH/);
 
   const installer = await import(pathToFileURL(resolve(installedRoot, "src", "installer", "index.js")).href);

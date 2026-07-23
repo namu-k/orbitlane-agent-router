@@ -1,0 +1,19 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { createClaudeTier1Adapter } from "../../src/adapters/claude/index.js";
+import { writeSnapshot } from "../../src/config/snapshots.js";
+import { resolveEffectiveContract } from "../../src/guards/resolve-contract.js";
+import { installRouting } from "../../src/installer/index.js";
+
+const lanes = { sol: { class: "judgment", reasoning: "high" }, terra: { class: "implementation", reasoning: "medium" }, luna: { class: "bounded-retrieval", reasoning: "low" } };
+function contractFor(model) { return { contract_version: "1.0.0", lanes, roles: { executor: { lane: "terra", provenance: "user-approved" } }, targets: { claude: { lanes: { terra: { model, provenance: "user-local" } } } } }; }
+function adapterFor(root, contract, sha256) { return createClaudeTier1Adapter(contract, { instructionPath: join(root, "CLAUDE.md"), generatedPath: join(root, ".orbitlane", "claude-report.json"), settingsPath: join(root, "settings.json"), spawnGuardCommand: `node hook ${root}`, contractSha256: sha256 }); }
+async function setup(t) { const root = await mkdtemp(join(tmpdir(), "orbitlane-rollback-")); t.after(() => rm(root, { recursive: true, force: true })); const contractA = contractFor("claude-a"); const snapshotA = await writeSnapshot(root, "contracts", `${JSON.stringify(contractA)}\n`); await installRouting(contractA, { target: "claude", adapters: { claude: adapterFor(root, contractA, snapshotA.sha256) } }); return { root, contractA, snapshotA }; }
+
+test("a failed install leaves the report pointing at the previous contract", async (t) => { const { root, snapshotA } = await setup(t); const contractB = contractFor("claude-b"); const snapshotB = await writeSnapshot(root, "contracts", `${JSON.stringify(contractB)}\n`); const failed = await installRouting(contractB, { target: "claude", adapters: { claude: adapterFor(root, contractB, snapshotB.sha256) }, hooks: { interruptAfterInstructionCommit: true } }); assert.equal(failed.outcomes.claude.status, "failed"); const report = JSON.parse(await readFile(join(root, ".orbitlane", "claude-report.json"), "utf8")); assert.equal(report.contract_snapshot.sha256, snapshotA.sha256); const resolved = await resolveEffectiveContract({ cwd: root, claudeConfigDir: root }); assert.equal(resolved.contractSha256, snapshotA.sha256); assert.equal(resolved.contract.targets.claude.lanes.terra.model, "claude-a"); });
+test("the orphaned snapshot from the failed install is harmless", async (t) => { const { root, snapshotA } = await setup(t); const contractB = contractFor("claude-b"); const snapshotB = await writeSnapshot(root, "contracts", `${JSON.stringify(contractB)}\n`); assert.notEqual(snapshotB.sha256, snapshotA.sha256); assert.equal(JSON.parse(await readFile(snapshotB.path, "utf8")).targets.claude.lanes.terra.model, "claude-b"); const resolved = await resolveEffectiveContract({ cwd: root, claudeConfigDir: root }); assert.equal(resolved.contractSha256, snapshotA.sha256); });
+test("recovery after a hard interruption restores the previous pointer", async (t) => { const { root, snapshotA } = await setup(t); const contractB = contractFor("claude-b"); const snapshotB = await writeSnapshot(root, "contracts", `${JSON.stringify(contractB)}\n`); const adapter = adapterFor(root, contractB, snapshotB.sha256); const interrupted = await installRouting(contractB, { target: "claude", adapters: { claude: { ...adapter, render: adapter.render, failurePoint: "leaveAfterInstructionCommit" } } }); const { recoverRouting } = await import("../../src/installer/index.js"); await recoverRouting({ manifest: interrupted.outcomes.claude.manifest }); const resolved = await resolveEffectiveContract({ cwd: root, claudeConfigDir: root }); assert.equal(resolved.contractSha256, snapshotA.sha256); });

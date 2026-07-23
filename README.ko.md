@@ -2,7 +2,9 @@
 
 [English](README.md)
 
-> **상태: v0.1.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
+> **상태: v0.2.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
+>
+> **v0.1.0에서 올라올 때는 재설치가 필요합니다.** report schema와 guard 인자 계약이 함께 바뀌었고, 패키지 업그레이드만으로는 이미 설치된 것이 갱신되지 않습니다. 재설치하기 전까지 해당 scope의 guard는 모든 Agent spawn을 거부하며, 어느 레이어를 재설치해야 하는지 오류에 명시합니다. [CHANGELOG.md](CHANGELOG.md) 참고.
 
 OrbitLane은 하나의 역할-모델 라우팅 계약을 Codex/OMX와 Claude Code의 네이티브 설정으로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 계약 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 Claude Code에 한정된 spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 
@@ -48,6 +50,33 @@ npx orbitlane install --target both --contract <path>
 ```
 
 전역 package 설치나 WSL 전용 설정은 요구하지 않습니다.
+
+## 2-레이어 설치
+
+OrbitLane은 두 레이어로 설치한다. 두 런타임 모두 전역과 프로젝트 instruction 파일을
+병합하므로 레이어는 경쟁하지 않고 합성된다.
+
+| 레이어 | 명령 | Claude Code | Codex |
+| --- | --- | --- | --- |
+| 전역 baseline | `orbitlane install --global --target both --contract <path>` | `~/.claude/CLAUDE.md`, `~/.claude/settings.json` | `~/.codex/AGENTS.md` |
+| 프로젝트 authoritative | `orbitlane install --target both --contract <path>` | `CLAUDE.md`, `.claude/settings.json` | `AGENTS.md` |
+
+`CODEX_HOME`과 `CLAUDE_CONFIG_DIR`을 설정하면 그 값을 존중한다.
+
+설치된 모든 Claude guard는 실행 시점에 동일한 effective contract를 해석한다.
+최근접 프로젝트 report가 이기고, 프로젝트 report가 없을 때만 전역 report를 쓴다.
+따라서 프로젝트가 전역 baseline을 override하면서도 두 guard의 판정이 갈리지 않는다.
+
+### install이 기록하는 것
+
+Claude target을 설치하면 guard runtime을 그것이 읽을 report 옆인
+`<config root>/.orbitlane/hook/`으로 복사하고, hook이 그 사본을 가리키게 한다.
+따라서 설치한 패키지가 사라진 뒤에도 guard는 계속 판정한다. 이는 `npx`와 `dlx`의
+정상적인 최종 상태다. `npx orbitlane install`은 모든 target과 두 레이어 모두에서
+지원한다.
+
+Claude target을 uninstall하면 그 사본과 snapshot 저장소를 함께 회수한다.
+heartbeat 로그는 증거이므로 남긴다.
 
 ## 코딩 에이전트 모델 라우팅의 작동 방식
 

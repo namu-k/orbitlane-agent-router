@@ -101,11 +101,49 @@ test("CLI emits unproven runtime capabilities until an installed release is evid
   assert.equal(generated.capabilities.native_role_configuration.status, "unproven");
 });
 
-test("CLI encodes user-controlled guard arguments before placing them in a shell command", async (t) => {
+test("CLI encodes the guard arguments it controls before placing them in a shell command", async (t) => {
   const { directory, contractPath } = await fixture(t);
-  const configRoot = join(directory, "$(not-a-command)-%ORBITLANE_TEST%");
+  // No `%` here: cmd would expand it, so install refuses such a root outright and
+  // the next test covers that path. `$(...)` is inert on both shells.
+  const configRoot = join(directory, "$(not-a-command)-root");
+
   await invoke(["install", "--target", "claude", "--config-root", configRoot, "--contract", contractPath]);
-  const settings = await readFile(join(configRoot, ".claude", "settings.json"), "utf8");
-  assert.doesNotMatch(settings, /\$\(not-a-command\)/);
-  assert.doesNotMatch(settings, /%ORBITLANE_TEST%/);
+
+  const command = JSON.parse(await readFile(join(configRoot, ".claude", "settings.json"), "utf8")).hooks.PreToolUse[0].hooks[0].command;
+  // Every argument after the interpreter and the script is base64, so no user text
+  // from the config root, the evidence path or the scope reaches the shell verbatim.
+  // Quoting differs per platform: POSIX single-quotes, cmd double-quotes.
+  const [, , ...encoded] = command.match(/'(?:[^']|'"'"')*'|"(?:[^"])*"/g) ?? [];
+  assert.equal(encoded.length, 3);
+  for (const argument of encoded) assert.match(argument, /^(['"])base64:[A-Za-z0-9+/=]+\1$/);
+});
+
+// The hook now lives under the config root, so its path cannot be base64: node has to
+// receive a real path. What must hold is that the shell cannot interpret it.
+test("a config root carrying shell metacharacters is quoted, not executed", { skip: process.platform === "win32" ? "cmd quoting is asserted separately" : false }, async (t) => {
+  const { directory, contractPath } = await fixture(t);
+  const marker = join(directory, "PWNED");
+  const configRoot = join(directory, `$(touch ${marker})-root`);
+
+  await invoke(["install", "--target", "claude", "--config-root", configRoot, "--contract", contractPath]);
+  const command = JSON.parse(await readFile(join(configRoot, ".claude", "settings.json"), "utf8")).hooks.PreToolUse[0].hooks[0].command;
+
+  const child = execFileAsync("sh", ["-c", command], { encoding: "utf8" });
+  child.child.stdin.end(JSON.stringify({ tool_name: "Agent", tool_input: { subagent_type: "executor", model: "claude-terra" } }));
+  const { code } = await child.then(() => ({ code: 0 }), (error) => ({ code: error.code }));
+
+  assert.equal(code, 0, "the quoted path must still launch the guard");
+  await assert.rejects(readFile(marker, "utf8"), "command substitution inside the config root must not run");
+});
+
+test("an install path the target shell would expand is refused up front", { skip: process.platform !== "win32" ? "only cmd expands %VAR% inside quotes" : false }, async (t) => {
+  const { directory, contractPath } = await fixture(t);
+
+  // The refusal fails the Claude target, so the CLI exits non-zero and reports the
+  // code in its JSON report rather than throwing a usage error on stderr.
+  const result = await invoke(["install", "--target", "claude", "--config-root", join(directory, "%ORBITLANE_TEST%"), "--contract", contractPath])
+    .then(({ stdout, stderr }) => ({ code: 0, stdout, stderr }), (error) => ({ code: error.code, stdout: error.stdout ?? "", stderr: error.stderr ?? "" }));
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout + result.stderr, /UNSAFE_INSTALL_PATH/);
 });

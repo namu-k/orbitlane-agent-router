@@ -30,13 +30,17 @@ test("allows a matching Claude Agent tool spawn and records an unproven heartbea
     now: () => "2026-07-22T00:00:00.000Z",
   });
 
-  assert.deepEqual(result, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven" });
+  assert.deepEqual(result, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven", heartbeat_recorded: true });
   assert.deepEqual(JSON.parse(await readFile(evidencePath, "utf8")), {
     correlation_id: "nested-1",
     decision: "allow",
     effective_model: "unproven",
     reason: "CONTRACT_MATCH",
     timestamp: "2026-07-22T00:00:00.000Z",
+    selected_scope: null,
+    contract_sha256: null,
+    report_path: null,
+    resolver_policy_version: null,
   });
 });
 
@@ -64,9 +68,13 @@ test("denies an Agent tool role or model mismatch with exit code 2", () => {
   });
 });
 
-test("marks operational heartbeat failures as fail-open but keeps invalid input denied", async () => {
-  const result = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "claude-terra" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
-  assert.deepEqual(result, { exitCode: 0, decision: "fail-open", reason: "GUARD_ERROR", effective_model: "unproven" });
+test("keeps the decision when heartbeat recording fails and keeps invalid input denied", async () => {
+  const allowed = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "claude-terra" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
+  assert.deepEqual(allowed, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven", heartbeat_recorded: false });
+
+  const denied = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "wrong" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
+  assert.deepEqual(denied, { exitCode: 2, decision: "deny", reason: "CONTRACT_MISMATCH", effective_model: "unproven", heartbeat_recorded: false });
+
   assert.deepEqual(evaluateClaudeAgentSpawn({ input: null, contract }), { exitCode: 2, decision: "deny", reason: "INVALID_AGENT_TOOL_INPUT", effective_model: "unproven" });
 });
 

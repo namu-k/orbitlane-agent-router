@@ -2,7 +2,9 @@
 
 [한국어](README.ko.md)
 
-> **Status: v0.1.0 is published to npm.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
+> **Status: v0.2.0 is published to npm.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
+>
+> **Upgrading from v0.1.0 requires reinstalling.** The report schema and the guard argument contract both changed, and upgrading the package does not rewrite anything already installed. Until you reinstall a scope, its guard denies every Agent spawn with a self-describing error naming the layer to reinstall. See [CHANGELOG.md](CHANGELOG.md).
 
 OrbitLane is an open-source **routing contract compiler** that compiles one role-to-model routing contract into runtime-native configuration for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and a Claude Code-scoped spawn guard. A general-purpose runtime model router is the Tier 2 roadmap.
 
@@ -48,6 +50,34 @@ npx orbitlane install --target both --contract <path>
 ```
 
 No global package installation or WSL-specific setup is required.
+
+## Two-layer installation
+
+OrbitLane installs in two layers. Both runtimes merge their global and project
+instruction files, so the layers compose rather than compete.
+
+| Layer | Command | Claude Code | Codex |
+| --- | --- | --- | --- |
+| Global baseline | `orbitlane install --global --target both --contract <path>` | `~/.claude/CLAUDE.md`, `~/.claude/settings.json` | `~/.codex/AGENTS.md` |
+| Project authoritative | `orbitlane install --target both --contract <path>` | `CLAUDE.md`, `.claude/settings.json` | `AGENTS.md` |
+
+`CODEX_HOME` and `CLAUDE_CONFIG_DIR` are honoured when set.
+
+Every installed Claude guard resolves the same effective contract at run time:
+the nearest project report wins, and the global report is used only when no
+project report exists. A project therefore overrides the global baseline
+without the two guards disagreeing.
+
+### What install writes
+
+Installing the Claude target copies the guard runtime next to the report it
+reads, under `<config root>/.orbitlane/hook/`, and points the hook at that copy.
+The installed guard therefore keeps deciding after the package that installed it
+is gone, which is the normal end state for `npx` and `dlx`. `npx orbitlane
+install` is supported for every target and both layers.
+
+Uninstalling the Claude target reclaims that copy along with the snapshot store.
+The heartbeat log is evidence and is left in place.
 
 ## How coding-agent model routing works
 
