@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -142,10 +142,13 @@ test("an unreadable project report denies instead of falling back to global", { 
   const reportPath = join(projectRoot, ".orbitlane", "claude-report.json");
   await chmod(reportPath, 0o000);
   t.after(() => chmod(reportPath, 0o600).catch(() => {}));
+  // The resolver canonicalises cwd first, and on macOS tmpdir() is a symlink
+  // (/var -> /private/var), so compare against the canonical path.
+  const canonical = join(await realpath(projectRoot), ".orbitlane", "claude-report.json");
 
   await assert.rejects(
     resolveEffectiveContract({ cwd: projectRoot, claudeConfigDir: globalRoot }),
-    (error) => error.code === "REPORT_UNREADABLE" && error.scope === "project" && error.reportPath === reportPath,
+    (error) => error.code === "REPORT_UNREADABLE" && error.scope === "project" && error.reportPath === canonical,
   );
 });
 
