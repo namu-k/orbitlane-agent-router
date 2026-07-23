@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { planSnapshot, readVerifiedSnapshot, snapshotDigest, writeSnapshot } from "../../src/config/snapshots.js";
+import { planSnapshot, readVerifiedSnapshot, snapshotDigest, snapshotPath, writeSnapshot } from "../../src/config/snapshots.js";
 
 async function root(t) {
   const directory = await mkdtemp(join(tmpdir(), "orbitlane-snapshot-"));
@@ -64,6 +64,34 @@ test("readVerifiedSnapshot rejects a missing or tampered snapshot", async (t) =>
     readVerifiedSnapshot(directory, "runtime-defaults", written.sha256),
     (error) => error.code === "SNAPSHOT_HASH_MISMATCH",
   );
+});
+
+test("a digest that is not a lowercase sha256 is rejected before it reaches a path", async (t) => {
+  const directory = await root(t);
+  for (const digest of ["../../etc/passwd", "A".repeat(64), "abc", `${"a".repeat(64)}/../..`, ""]) {
+    assert.throws(() => snapshotPath(directory, "contracts", digest), (error) => error.code === "INVALID_SNAPSHOT_DIGEST");
+    await assert.rejects(readVerifiedSnapshot(directory, "contracts", digest), (error) => error.code === "INVALID_SNAPSHOT_DIGEST");
+  }
+});
+
+test("writeSnapshot publishes atomically and leaves no partial file behind", async (t) => {
+  const directory = await root(t);
+  const content = `${JSON.stringify({ a: 1 })}\n`;
+  const planned = planSnapshot(directory, "contracts", content);
+
+  await assert.rejects(
+    writeSnapshot(directory, "contracts", content, {
+      writeFile: async () => { throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" }); },
+    }),
+    (error) => error.code === "ENOSPC",
+  );
+
+  await assert.rejects(readVerifiedSnapshot(directory, "contracts", planned.sha256), (error) => error.code === "SNAPSHOT_UNREADABLE");
+  assert.deepEqual(await readdir(join(directory, ".orbitlane", "contracts")), []);
+
+  const written = await writeSnapshot(directory, "contracts", content);
+  assert.equal(await readFile(written.path, "utf8"), content);
+  assert.deepEqual(await readdir(join(directory, ".orbitlane", "contracts")), [`${written.sha256}.json`]);
 });
 
 test("an unknown snapshot kind is rejected", async (t) => {
