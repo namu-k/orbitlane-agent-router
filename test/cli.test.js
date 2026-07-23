@@ -112,9 +112,10 @@ test("CLI encodes the guard arguments it controls before placing them in a shell
   const command = JSON.parse(await readFile(join(configRoot, ".claude", "settings.json"), "utf8")).hooks.PreToolUse[0].hooks[0].command;
   // Every argument after the interpreter and the script is base64, so no user text
   // from the config root, the evidence path or the scope reaches the shell verbatim.
+  // Quoting differs per platform: POSIX single-quotes, cmd double-quotes.
   const [, , ...encoded] = command.match(/'(?:[^']|'"'"')*'|"(?:[^"])*"/g) ?? [];
   assert.equal(encoded.length, 3);
-  for (const argument of encoded) assert.match(argument, /^'base64:[A-Za-z0-9+/=]+'$/);
+  for (const argument of encoded) assert.match(argument, /^(['"])base64:[A-Za-z0-9+/=]+\1$/);
 });
 
 // The hook now lives under the config root, so its path cannot be base64: node has to
