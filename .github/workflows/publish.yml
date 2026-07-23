@@ -10,17 +10,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Lets the runner mint the OIDC identity token npm exchanges for publish rights.
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      # No registry-url on purpose. It makes setup-node write an .npmrc line reading
+      # _authToken=${NODE_AUTH_TOKEN}; npm then treats authentication as already
+      # configured and never starts the OIDC exchange, failing with ENEEDAUTH or E404.
+      # NODE_AUTH_TOKEN stays unset for the same reason: trusted publishing uses no
+      # token at all.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+      # Node 22 ships npm 10; trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@latest
+      - run: npm --version
       - run: npm install --ignore-scripts
       - run: npm test
       - run: npm pack --dry-run --json
-      # Requires an NPM_TOKEN repository secret (npm automation token) with publish rights.
+      # Publish rights come from the trusted publisher registered on npmjs.com against
+      # this repository and this workflow filename. There is no NPM_TOKEN secret.
       - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
