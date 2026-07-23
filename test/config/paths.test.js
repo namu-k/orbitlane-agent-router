@@ -44,3 +44,21 @@ test("global mode refuses an explicit config root", () => {
     (error) => error.code === "GLOBAL_CONFLICTS_CONFIG_ROOT",
   );
 });
+
+test("global mode treats an empty or blank runtime home as unset", () => {
+  for (const blank of ["", "   ", "\t\n"]) {
+    const paths = resolveTargetPaths({ global: true, env: { CODEX_HOME: blank, CLAUDE_CONFIG_DIR: blank }, homedir });
+
+    assert.equal(paths.codex.root, join("/", "home", "fixture", ".codex"));
+    assert.equal(paths.claude.settingsPath, join("/", "home", "fixture", ".claude", "settings.json"));
+  }
+});
+
+test("global mode refuses a relative runtime home instead of anchoring it to cwd", () => {
+  for (const env of [{ CODEX_HOME: "codex-home" }, { CLAUDE_CONFIG_DIR: "../claude" }, { CODEX_HOME: "~/.codex" }]) {
+    assert.throws(
+      () => resolveTargetPaths({ global: true, env, homedir }),
+      (error) => error.code === "GLOBAL_HOME_NOT_ABSOLUTE",
+    );
+  }
+});

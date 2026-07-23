@@ -1,5 +1,16 @@
 import { homedir as osHomedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+
+// A blank override is an unset override: `resolve("")` is the current directory, so
+// honouring it would turn a --global install into a stray write wherever the user
+// happened to be standing. A relative override has the same failure mode silently.
+function globalRoot(name, value, fallback) {
+  if (typeof value !== "string" || value.trim().length === 0) return resolve(fallback);
+  if (!isAbsolute(value)) {
+    throw Object.assign(new Error(`GLOBAL_HOME_NOT_ABSOLUTE: ${name} must be an absolute path, got ${JSON.stringify(value)}`), { code: "GLOBAL_HOME_NOT_ABSOLUTE" });
+  }
+  return resolve(value);
+}
 
 function layout(root, settingsPath) {
   return Object.freeze({
@@ -26,8 +37,8 @@ export function resolveTargetPaths({ global = false, configRoot, env = process.e
     return layout(root, join(root, ".claude", "settings.json"));
   }
   const home = homedir();
-  const codexRoot = resolve(env.CODEX_HOME ?? join(home, ".codex"));
-  const claudeRoot = resolve(env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"));
+  const codexRoot = globalRoot("CODEX_HOME", env.CODEX_HOME, join(home, ".codex"));
+  const claudeRoot = globalRoot("CLAUDE_CONFIG_DIR", env.CLAUDE_CONFIG_DIR, join(home, ".claude"));
   const project = layout(claudeRoot, join(claudeRoot, "settings.json"));
   return Object.freeze({
     codex: Object.freeze({

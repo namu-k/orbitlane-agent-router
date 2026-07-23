@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,3 +34,27 @@ test("--global writes Claude settings flat in the config home", async (t) => {
 });
 test("--global with --config-root is refused by code", async (t) => { const { contractPath, directory, env } = await isolated(t); const result = await invoke(["install", "--global", "--config-root", directory, "--target", "claude", "--contract", contractPath], { env }); assert.equal(result.code, 2); assert.match(result.stderr, /GLOBAL_CONFLICTS_CONFIG_ROOT/); });
 test("--global dry-run writes nothing at all", async (t) => { const { contractPath, codexHome, claudeHome, env } = await isolated(t); assert.equal((await invoke(["install", "--global", "--target", "both", "--dry-run", "--contract", contractPath], { env })).code, 0); await assert.rejects(readFile(join(codexHome, "AGENTS.md"), "utf8")); await assert.rejects(readFile(join(claudeHome, "CLAUDE.md"), "utf8")); await assert.rejects(readFile(join(claudeHome, "settings.json"), "utf8")); });
+
+test("--global with blank runtime homes falls back to the home directory, never cwd", async (t) => {
+  const { contractPath, directory, env } = await isolated(t);
+  const cwd = join(directory, "somewhere");
+  await mkdir(cwd, { recursive: true });
+
+  const result = await invoke(["install", "--global", "--target", "both", "--contract", contractPath], { env: { ...env, CODEX_HOME: "", CLAUDE_CONFIG_DIR: "  " }, cwd });
+
+  assert.equal(result.code, 0);
+  assert.match(await readFile(join(directory, "home", ".codex", "AGENTS.md"), "utf8"), /ORBITLANE:START codex/);
+  assert.match(await readFile(join(directory, "home", ".claude", "CLAUDE.md"), "utf8"), /ORBITLANE:START claude/);
+  await assert.rejects(readFile(join(cwd, "AGENTS.md"), "utf8"));
+  await assert.rejects(readFile(join(cwd, "CLAUDE.md"), "utf8"));
+  await assert.rejects(readFile(join(cwd, "settings.json"), "utf8"));
+});
+
+test("--global with a relative runtime home is refused by code", async (t) => {
+  const { contractPath, env } = await isolated(t);
+
+  const result = await invoke(["install", "--global", "--target", "codex", "--contract", contractPath], { env: { ...env, CODEX_HOME: "relative-codex-home" } });
+
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /GLOBAL_HOME_NOT_ABSOLUTE/);
+});
