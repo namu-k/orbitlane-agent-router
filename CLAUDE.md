@@ -1,7 +1,6 @@
 # OrbitLane Agent Router
 
 Canonical routing contract compiler for coding-agent runtimes (Codex/OMX, Claude Code).
-Design docs live under `docs/superpowers/specs/`.
 
 ## Skill routing
 

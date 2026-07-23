@@ -232,10 +232,6 @@ v1에는 telemetry를 넣지 않을 계획입니다.
 
 OrbitLane v0.1.0이 Tier 1 CLI로 npm에 배포되었습니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code adapter, Claude Code scoped spawn guard. Review는 contract, claim boundary, adapter interface와 cross-platform 설치 동작에 집중해야 합니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
 
-## 설계 문서
-
-[라우팅과 orchestration 종합 설계](docs/superpowers/specs/2026-07-22-orbitlane-routing-orchestration-design.md)는 저장소의 목적, context 비용 우려, direct-first delegation 정책, skill 우선순위, agent lifecycle, adapter 경계와 v1 acceptance criteria를 기록합니다.
-
 ## 검색 및 발견성 메모
 
 첫 공개 release에 권장하는 GitHub topics는 다음과 같습니다.

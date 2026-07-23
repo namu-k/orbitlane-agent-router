@@ -232,10 +232,6 @@ No. The installer is designed to own only a clearly marked routing block and pre
 
 OrbitLane v0.1.0 is published to npm as a Tier 1 CLI: contract compilation, a merge-preserving installer, Codex/OMX and Claude Code adapters, and a Claude Code-scoped spawn guard. Review should focus on the contract, claim boundaries, adapter interfaces, and cross-platform installation behavior. Universal runtime enforcement remains the Tier 2 roadmap.
 
-## Design documentation
-
-The [routing and orchestration design](docs/superpowers/specs/2026-07-22-orbitlane-routing-orchestration-design.md) records the project purpose, context-cost concerns, direct-first delegation policy, skill precedence, agent lifecycle, adapter boundaries, and v1 acceptance criteria. The current design document is written in Korean so the originating decisions can be reviewed without translation loss.
-
 ## Discoverability notes
 
 Recommended GitHub topics for the first public release:
