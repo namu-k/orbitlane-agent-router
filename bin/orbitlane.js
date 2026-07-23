@@ -55,6 +55,29 @@ function failedAdapter(error, paths) {
   return Object.freeze({ ...paths, render: () => { throw error; } });
 }
 
+async function readJsonIfPossible(path) {
+  try { return JSON.parse(await readFile(path, "utf8")); } catch { return undefined; }
+}
+
+async function receiptAdapters(options) {
+  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot });
+  const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
+  const result = {};
+  if (selected.includes("codex")) result.codex = Object.freeze({ ...resolved.codex, spawnGuardCommand: false });
+  if (selected.includes("claude")) {
+    const report = await readJsonIfPossible(resolved.claude.generatedPath);
+    const command = report?.settings_projection?.guard_command;
+    const settings = await readJsonIfPossible(resolved.claude.settingsPath);
+    const installed = (settings?.hooks?.PreToolUse ?? [])
+      .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+      .some((hook) => hook?.type === "command" && hook.command === command);
+    result.claude = typeof command === "string" && command.length > 0 && installed
+      ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
+      : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
+  }
+  return Object.freeze(result);
+}
+
 function adapters(contract, options) {
   const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot });
   const codexPaths = resolved.codex;
@@ -91,6 +114,9 @@ async function main() {
   const options = parse(process.argv.slice(2));
   if (options.command === "help") return null;
   if (options.command === "recover") return recoverRouting({ manifest: { path: resolve(options.manifest) } });
+  if (options.command === "uninstall" && options.contract === undefined) {
+    return uninstallRouting({ target: options.target, adapters: await receiptAdapters(options) });
+  }
   const contract = await json(options.contract);
   const runtimeDefaults = options.runtimeDefaults === undefined ? undefined : await json(options.runtimeDefaults);
   const contractBytes = await readFile(resolve(options.contract), "utf8");
