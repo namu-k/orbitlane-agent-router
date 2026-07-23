@@ -34,7 +34,6 @@ export function resolveCodexRequestedRoutes(contract, runtimeDefaults) {
     const model = binding?.model ?? (defaultValid ? defaultBinding.model : undefined);
     if (!model) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
     routes[role] = Object.freeze({
-      target: "codex",
       lane: configuration.lane,
       model,
       modelSource: binding ? "target-binding" : "runtime-default",
@@ -55,7 +54,7 @@ export function createCodexTier1Adapter(contract, options) {
     supportsVersion: options.supportsVersion,
     render() {
       return Object.freeze({
-        policy: projectPolicy({ target: "codex", contract, routes }),
+        policy: projectPolicy({ target: "codex", contract }),
         generated: `${JSON.stringify({
           adapter: "codex-omx",
           tier: "tier1",

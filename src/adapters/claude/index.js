@@ -80,7 +80,6 @@ export function resolveClaudeRequestedRoutes(contract, runtimeDefaults) {
     if (!model) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
 
     routes[role] = Object.freeze({
-      target: "claude",
       lane: configuration.lane,
       model,
       modelSource: binding ? "target-binding" : "runtime-default",
@@ -129,7 +128,7 @@ export function createClaudeTier1Adapter(contract, options) {
     supportsVersion: options.supportsVersion,
     render() {
       return Object.freeze({
-        policy: projectPolicy({ target: "claude", contract, routes }),
+        policy: projectPolicy({ target: "claude", contract }),
         settingsProjection: options.spawnGuardCommand === undefined ? undefined : Object.freeze({ command: options.spawnGuardCommand }),
         generated: `${JSON.stringify({
           adapter: "claude-code",

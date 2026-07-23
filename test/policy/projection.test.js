@@ -18,12 +18,6 @@ const contract = Object.freeze({
   },
 });
 
-const routesFor = (target) => Object.freeze({
-  architect: Object.freeze({ target, lane: "sol", model: "target-architect" }),
-  executor: Object.freeze({ target, lane: "terra", model: "target-executor" }),
-  explore: Object.freeze({ target, lane: "luna", model: "target-explore" }),
-});
-
 test("publishes the portable core catalog with the canonical lane mapping", () => {
   assert.deepEqual(stableRoleCatalog(), {
     architect: { access: "read-only", lane: "sol", responsibility: "architecture and consequential judgment" },
@@ -44,12 +38,12 @@ test("rejects a contract that remaps a stable catalog role to another canonical 
 });
 
 test("projects a deterministic marker policy rather than a runtime router", () => {
-  const policy = projectPolicy({ target: "codex", contract, routes: routesFor("codex") });
+  const policy = projectPolicy({ target: "codex", contract });
 
   assert.match(policy, /Policy projection only; it is not runtime router code\./);
   assert.match(policy, /Precedence: system, safety, filesystem, and authority constraints; explicit user prohibitions and topology; explicit skill activation; workflow request; direct-first gate; role to lane to model mapping; runtime capability and evidence boundary\./);
   assert.match(policy, /Resolver order after higher constraints: explicit user role, lane, model, or topology; explicit skill activation; workflow request; plan metadata; deterministic task shape; leader judgment\./);
-  assert.match(policy, /Target model routes: architect="target-architect", executor="target-executor", explore="target-explore"\./);
+  assert.match(policy, /Contract routes: architect=sol, executor=terra, explore=luna\./);
   assert.match(policy, /Direct-first: keep work direct unless a bounded delegation benefit is demonstrated\./);
   assert.match(policy, /Plan size alone never creates an agent instance\./);
   assert.match(policy, /Coupled multi-phase work keeps one persistent primary owner\./);
@@ -65,34 +59,12 @@ test("projects a deterministic marker policy rather than a runtime router", () =
   assert.match(policy, /Report installed roles outside the contract as unmanaged; do not block installation unless strict mode is requested\./);
 });
 
-test("requires resolved target models instead of exposing canonical lane names", () => {
-  assert.throws(
-    () => projectPolicy({ target: "claude", contract }),
-    { message: "UNRESOLVED_TARGET_MODEL: architect" },
-  );
-});
-
-test("rejects canonical lane names, whitespace, lane mismatches, and cross-target routes", () => {
-  const cases = [
-    { route: { target: "claude", lane: "sol", model: "sol" }, message: "INVALID_TARGET_MODEL_ROUTE: architect" },
-    { route: { target: "claude", lane: "sol", model: "   " }, message: "INVALID_TARGET_MODEL_ROUTE: architect" },
-    { route: { target: "claude", lane: "terra", model: "opus" }, message: "INVALID_TARGET_MODEL_ROUTE: architect" },
-    { route: { target: "codex", lane: "sol", model: "opus" }, message: "INVALID_TARGET_MODEL_ROUTE: architect" },
-  ];
-  for (const { route, message } of cases) {
-    assert.throws(
-      () => projectPolicy({ target: "claude", contract, routes: { ...routesFor("claude"), architect: route } }),
-      { message },
-    );
-  }
-});
-
 test("projects policy inside the target marker boundary", () => {
-  assert.match(projectMarkerBoundedPolicy({ target: "codex", contract, routes: routesFor("codex") }), /^<!-- ORBITLANE:START codex -->\n[\s\S]*<!-- ORBITLANE:END codex -->\n$/);
+  assert.match(projectMarkerBoundedPolicy({ target: "codex", contract }), /^<!-- ORBITLANE:START codex -->\n[\s\S]*<!-- ORBITLANE:END codex -->\n$/);
 });
 
 test("golden delegation fixtures bind every expectation to projected policy text", () => {
-  const policy = projectPolicy({ target: "claude", contract, routes: routesFor("claude") });
+  const policy = projectPolicy({ target: "claude", contract });
   assert.deepEqual(delegationDecisionFixtures().map((fixture) => fixture.policyText), [
     "A short single-file change stays direct.",
     "A consequential judgment depending on a long conversation stays direct.",

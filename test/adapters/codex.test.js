@@ -12,9 +12,9 @@ const contract = Object.freeze({
 
 test("resolves Codex requested routes from binding before runtime lane defaults", () => {
   assert.deepEqual(resolveCodexRequestedRoutes(contract, { release: { version: "1", source: "official", hash: "a".repeat(64) }, lanes: { judgment: { model: "codex-default-sol", provenance: "official-default" }, implementation: { model: "codex-terra", provenance: "official-default" }, "bounded-retrieval": { model: "codex-luna", provenance: "official-default" } } }), {
-    architect: { target: "codex", lane: "sol", model: "codex-sol", modelSource: "target-binding", provenance: "user-local", reasoning: "high" },
-    executor: { target: "codex", lane: "terra", model: "codex-terra", modelSource: "runtime-default", provenance: "official-default", reasoning: "medium" },
-    explore: { target: "codex", lane: "luna", model: "codex-luna", modelSource: "runtime-default", provenance: "official-default", reasoning: "low" },
+    architect: { lane: "sol", model: "codex-sol", modelSource: "target-binding", provenance: "user-local", reasoning: "high" },
+    executor: { lane: "terra", model: "codex-terra", modelSource: "runtime-default", provenance: "official-default", reasoning: "medium" },
+    explore: { lane: "luna", model: "codex-luna", modelSource: "runtime-default", provenance: "official-default", reasoning: "low" },
   });
 });
 
@@ -35,8 +35,6 @@ test("emits a Tier 1 report with separate requested receipts and unproven native
   const generated = JSON.parse(rendered.generated);
 
   assert.match(rendered.policy, /OrbitLane policy projection for codex/);
-  assert.match(rendered.policy, /Target model routes: architect="codex-sol", executor="codex-terra", explore="codex-luna"\./);
-  assert.doesNotMatch(rendered.policy, /Contract routes: architect=sol, executor=terra, explore=luna\./);
   assert.equal(generated.tier, "tier1");
   assert.equal(generated.configuration_enforced, false);
   assert.equal(generated.semantic_policy_audited, true);

@@ -120,8 +120,6 @@ OrbitLane uses semantic lanes rather than hard-coding a vendor's current model n
 
 Lanes carry a canonical id (`sol` / `terra` / `luna`) and a `class` (judgment / implementation / bounded-retrieval); public examples do not hard-code provider model names. Adapters resolve each lane to a supported model using the contract's optional per-target binding, else the runtime's official default for that lane class, recording the source; ambiguous resolution fails rather than guessing. A role the contract routes fails validation until classified with provenance (or under `--strict`); installed roles the contract does not route are reported as `unmanaged` and left untouched.
 
-Target policy projections do not expose canonical lane IDs as though they were model names. They record the resolved target model for each role; for example, a Claude projection can show `architect="opus"`, `executor="sonnet"`, and `explore="haiku"`. These are requested configuration routes, not proof of the model that ultimately executed.
-
 ## Enforcement tiers
 
 OrbitLane separates useful routing from claims that require runtime proof.
