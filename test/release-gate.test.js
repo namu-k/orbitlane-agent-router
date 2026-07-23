@@ -57,13 +57,26 @@ function publicSafetyIssues(path, text) {
   ];
 }
 
+// npm 12 reports `npm pack --json` as an object keyed by package name; npm 11 and
+// earlier return an array of the same entries. The release gate has to read both,
+// because the publish job installs the newest npm to satisfy trusted publishing.
+function packReport(stdout) {
+  const parsed = JSON.parse(stdout);
+  const entries = Array.isArray(parsed) ? parsed : Object.values(parsed);
+  const archive = entries[0];
+  if (archive === undefined || !Array.isArray(archive.files) || typeof archive.filename !== "string") {
+    throw new TypeError(`unrecognised npm pack --json shape: ${stdout.slice(0, 200)}`);
+  }
+  return archive;
+}
+
 test("release package is allowlisted, private-free, and ships its CLI", async () => {
   const [packageText, packed] = await Promise.all([
     readFile(packagePath, "utf8"),
     runPackageCommand("npm", ["pack", "--dry-run", "--json"], { cwd: root }),
   ]);
   const manifest = JSON.parse(packageText);
-  const archive = JSON.parse(packed.stdout)[0];
+  const archive = packReport(packed.stdout);
   const paths = archive.files.map((file) => file.path);
 
   assert.notEqual(manifest.private, true, "the package must be publishable (not private)");
@@ -142,7 +155,7 @@ test("CI exercises tests on three operating systems and keeps publish manual", a
 test("release-gate dry run executes the packed CLI, scoped guard, and rollback locally", async (t) => {
   const directory = await mkdtemp(resolve(tmpdir(), "orbitlane-release-gate-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const packed = JSON.parse((await runPackageCommand("npm", ["pack", "--json", "--pack-destination", directory], { cwd: root })).stdout)[0];
+  const packed = packReport((await runPackageCommand("npm", ["pack", "--json", "--pack-destination", directory], { cwd: root })).stdout);
   const tarball = resolve(directory, packed.filename);
   assert.ok(packed.files.every((file) => !/(?:evidence|backups?|\.orbitlane-)/i.test(file.path)));
   await runPackageCommand("npm", ["install", "--ignore-scripts", "--no-package-lock", "--prefix", directory, tarball]);
