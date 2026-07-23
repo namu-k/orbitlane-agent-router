@@ -49,6 +49,37 @@ npx orbitlane install --target both --contract <path>
 
 No global package installation or WSL-specific setup is required.
 
+## Two-layer installation
+
+OrbitLane installs in two layers. Both runtimes merge their global and project
+instruction files, so the layers compose rather than compete.
+
+| Layer | Command | Claude Code | Codex |
+| --- | --- | --- | --- |
+| Global baseline | `orbitlane install --global --target both --contract <path>` | `~/.claude/CLAUDE.md`, `~/.claude/settings.json` | `~/.codex/AGENTS.md` |
+| Project authoritative | `orbitlane install --target both --contract <path>` | `CLAUDE.md`, `.claude/settings.json` | `AGENTS.md` |
+
+`CODEX_HOME` and `CLAUDE_CONFIG_DIR` are honoured when set.
+
+Every installed Claude guard resolves the same effective contract at run time:
+the nearest project report wins, and the global report is used only when no
+project report exists. A project therefore overrides the global baseline
+without the two guards disagreeing.
+
+### Support boundary
+
+The global Claude guard requires a persistent package installation:
+
+```bash
+npm install -g orbitlane
+orbitlane install --global --target claude --contract ./contract.json
+```
+
+Running it through `npx` or `dlx` is refused with `EPHEMERAL_PACKAGE_ROOT`,
+because the installed hook stores an absolute path into a cache that can be
+evicted. Every other command, including `--global --target codex`, works fine
+under `npx`.
+
 ## How coding-agent model routing works
 
 ```text

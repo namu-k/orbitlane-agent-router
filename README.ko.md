@@ -49,6 +49,35 @@ npx orbitlane install --target both --contract <path>
 
 전역 package 설치나 WSL 전용 설정은 요구하지 않습니다.
 
+## 2-레이어 설치
+
+OrbitLane은 두 레이어로 설치한다. 두 런타임 모두 전역과 프로젝트 instruction 파일을
+병합하므로 레이어는 경쟁하지 않고 합성된다.
+
+| 레이어 | 명령 | Claude Code | Codex |
+| --- | --- | --- | --- |
+| 전역 baseline | `orbitlane install --global --target both --contract <path>` | `~/.claude/CLAUDE.md`, `~/.claude/settings.json` | `~/.codex/AGENTS.md` |
+| 프로젝트 authoritative | `orbitlane install --target both --contract <path>` | `CLAUDE.md`, `.claude/settings.json` | `AGENTS.md` |
+
+`CODEX_HOME`과 `CLAUDE_CONFIG_DIR`을 설정하면 그 값을 존중한다.
+
+설치된 모든 Claude guard는 실행 시점에 동일한 effective contract를 해석한다.
+최근접 프로젝트 report가 이기고, 프로젝트 report가 없을 때만 전역 report를 쓴다.
+따라서 프로젝트가 전역 baseline을 override하면서도 두 guard의 판정이 갈리지 않는다.
+
+### 지원 경계
+
+전역 Claude guard는 persistent package install을 요구한다.
+
+```bash
+npm install -g orbitlane
+orbitlane install --global --target claude --contract ./contract.json
+```
+
+`npx`나 `dlx`로 실행하면 `EPHEMERAL_PACKAGE_ROOT`로 거부한다. 설치된 hook이
+제거될 수 있는 캐시의 절대경로를 저장하기 때문이다. `--global --target codex`를
+포함한 다른 모든 명령은 `npx`에서 정상 동작한다.
+
 ## 코딩 에이전트 모델 라우팅의 작동 방식
 
 ```text
