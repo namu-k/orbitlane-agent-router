@@ -103,7 +103,9 @@ test("CLI emits unproven runtime capabilities until an installed release is evid
 
 test("CLI encodes the guard arguments it controls before placing them in a shell command", async (t) => {
   const { directory, contractPath } = await fixture(t);
-  const configRoot = join(directory, "$(not-a-command)-%ORBITLANE_TEST%");
+  // No `%` here: cmd would expand it, so install refuses such a root outright and
+  // the next test covers that path. `$(...)` is inert on both shells.
+  const configRoot = join(directory, "$(not-a-command)-root");
 
   await invoke(["install", "--target", "claude", "--config-root", configRoot, "--contract", contractPath]);
 
@@ -136,8 +138,11 @@ test("a config root carrying shell metacharacters is quoted, not executed", { sk
 test("an install path the target shell would expand is refused up front", { skip: process.platform !== "win32" ? "only cmd expands %VAR% inside quotes" : false }, async (t) => {
   const { directory, contractPath } = await fixture(t);
 
-  const result = await invoke(["install", "--target", "claude", "--config-root", join(directory, "%ORBITLANE_TEST%"), "--contract", contractPath]);
+  // The refusal fails the Claude target, so the CLI exits non-zero and reports the
+  // code in its JSON report rather than throwing a usage error on stderr.
+  const result = await invoke(["install", "--target", "claude", "--config-root", join(directory, "%ORBITLANE_TEST%"), "--contract", contractPath])
+    .then(({ stdout, stderr }) => ({ code: 0, stdout, stderr }), (error) => ({ code: error.code, stdout: error.stdout ?? "", stderr: error.stderr ?? "" }));
 
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /UNSAFE_INSTALL_PATH/);
+  assert.match(result.stdout + result.stderr, /UNSAFE_INSTALL_PATH/);
 });

@@ -133,7 +133,11 @@ test("a tampered snapshot denies", async (t) => {
   );
 });
 
-test("an unreadable project report denies instead of falling back to global", { skip: process.getuid?.() === 0 ? "chmod cannot deny root" : false }, async (t) => {
+// chmod on Windows only toggles the read-only flag, so read access cannot be
+// withdrawn there; root ignores the mode entirely.
+const cannotDenyReads = process.platform === "win32" ? "chmod does not withdraw read access on Windows" : process.getuid?.() === 0 ? "chmod cannot deny root" : false;
+
+test("an unreadable project report denies instead of falling back to global", { skip: cannotDenyReads }, async (t) => {
   const directory = await base(t);
   const globalRoot = join(directory, "home", ".claude");
   const projectRoot = join(directory, "repo");
