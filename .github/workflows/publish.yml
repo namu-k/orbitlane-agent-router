@@ -28,6 +28,15 @@ jobs:
       - run: npm install --ignore-scripts
       - run: npm test
       - run: npm pack --dry-run --json
+      # Records whether the runner was actually granted an OIDC identity, which tells
+      # a failed publish apart: no identity means the permission never took effect,
+      # an identity plus a rejection means the trusted publisher does not match.
+      - name: Report OIDC identity availability
+        run: |
+          # Presence only. Never interpolate the values: the request token is a
+          # credential and the request URL identifies the run.
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL}" ]; then echo "request URL: present"; else echo "request URL: absent"; fi
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" ]; then echo "request token: present"; else echo "request token: absent"; fi
       # Publish rights come from the trusted publisher registered on npmjs.com against
       # this repository and this workflow filename. There is no NPM_TOKEN secret.
-      - run: npm publish --access public
+      - run: npm publish --access public --loglevel verbose
