@@ -11,6 +11,11 @@ import { installRouting, previewRouting, recoverRouting, uninstallRouting } from
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = new Set(["codex", "claude", "both"]);
+const EPHEMERAL_SEGMENTS = new Set(["_npx", "_cacache", ".npm"]);
+
+function packageRootIsEphemeral() {
+  return PACKAGE_ROOT.split(/[\\/]/).some((segment) => EPHEMERAL_SEGMENTS.has(segment));
+}
 
 function usage() {
   return "Usage: orbitlane <install|uninstall|recover> --target <codex|claude|both> --contract <path> [--global] [--config-root <path>] [--runtime-defaults <path>] [--dry-run]";
@@ -91,6 +96,9 @@ function adapters(contract, options) {
   }
   if (selected.includes("claude")) {
     try {
+      if (options.global === true && packageRootIsEphemeral()) {
+        throw Object.assign(new Error("EPHEMERAL_PACKAGE_ROOT: install orbitlane persistently (npm i -g orbitlane) before using --global with the Claude guard"), { code: "EPHEMERAL_PACKAGE_ROOT" });
+      }
       result.claude = createClaudeTier1Adapter(contract, {
         ...claudePaths,
         spawnGuardCommand: guardCommand(process.execPath, join(PACKAGE_ROOT, "src", "guards", "claude-spawn-hook.js"), resolved.claude.root, join(generated, "claude-heartbeats.jsonl")),
