@@ -53,17 +53,49 @@ test("denies a detectable model override even when the declared model matches", 
   });
 });
 
-test("denies an Agent tool role or model mismatch with exit code 2", () => {
+test("denies a contract-routed role spawned with the wrong model", () => {
   assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor", model: "wrong" }, contract }), {
     exitCode: 2,
     decision: "deny",
     reason: "CONTRACT_MISMATCH",
     effective_model: "unproven",
   });
-  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "unknown", model: "claude-terra" }, contract }), {
+});
+
+test("passes through a subagent type the contract does not route", () => {
+  // The contract routes only `executor`; the built-in Claude Code agent types
+  // (general-purpose, Explore, Plan, ...) are unmanaged and must not be blocked.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "general-purpose", model: "sonnet" }, contract }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "UNMANAGED_ROLE",
+    effective_model: "unproven",
+  });
+});
+
+test("passes through an unmanaged role even with no model, but a routed role must declare one", () => {
+  // An unmanaged role is out of scope, so a missing model is not the guard's concern.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "Explore" }, contract }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "UNMANAGED_ROLE",
+    effective_model: "unproven",
+  });
+  // A routed role with no model cannot be checked, so it is denied.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor" }, contract }), {
     exitCode: 2,
     decision: "deny",
-    reason: "UNCLASSIFIED_ROLE",
+    reason: "INVALID_AGENT_TOOL_INPUT",
+    effective_model: "unproven",
+  });
+});
+
+test("still denies a detectable override on an unmanaged role's routed collision is not possible", () => {
+  // A non-string subagent type cannot be looked up at all.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: 42, model: "sonnet" }, contract }), {
+    exitCode: 2,
+    decision: "deny",
+    reason: "INVALID_AGENT_TOOL_INPUT",
     effective_model: "unproven",
   });
 });
