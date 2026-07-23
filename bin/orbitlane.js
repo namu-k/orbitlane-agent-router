@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -108,6 +108,28 @@ function adapters(contract, options) {
   return Object.freeze(result);
 }
 
+// The snapshot store exists only to back the Claude report's pointer. Once that
+// report is gone nothing can reach these files again, so a successful Claude
+// uninstall reclaims them. The heartbeat log is evidence, not derived state, and is
+// left alone. A cleanup failure is reported but never rewrites the uninstall verdict,
+// which has already been committed by the transaction layer.
+async function reclaimSnapshotStore(options, report) {
+  if (report?.outcomes?.claude?.status !== "uninstalled") return;
+  const root = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot }).claude.root;
+  for (const kind of ["contracts", "runtime-defaults"]) {
+    const path = join(root, ".orbitlane", kind);
+    try { await rm(path, { recursive: true, force: true }); } catch (error) {
+      process.stderr.write(`SNAPSHOT_CLEANUP_FAILED: ${path} (${error?.code ?? "unknown"})\n`);
+    }
+  }
+}
+
+async function uninstall(options, targetAdapters) {
+  const report = await uninstallRouting({ target: options.target, adapters: targetAdapters });
+  await reclaimSnapshotStore(options, report);
+  return report;
+}
+
 function exitCode(report) {
   if (report?.status === "failed") return 2;
   const outcomes = Object.values(report.outcomes ?? {});
@@ -120,7 +142,7 @@ async function main() {
   if (options.command === "help") return null;
   if (options.command === "recover") return recoverRouting({ manifest: { path: resolve(options.manifest) } });
   if (options.command === "uninstall" && options.contract === undefined) {
-    return uninstallRouting({ target: options.target, adapters: await receiptAdapters(options) });
+    return uninstall(options, await receiptAdapters(options));
   }
   const contractSource = await loadJsonSource(options.contract);
   const runtimeDefaultsSource = options.runtimeDefaults === undefined ? undefined : await loadJsonSource(options.runtimeDefaults);
@@ -132,7 +154,7 @@ async function main() {
   const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
   const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
   const targetAdapters = adapters(contract, { ...options, runtimeDefaults, contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 });
-  if (options.command === "uninstall") return uninstallRouting({ target: options.target, adapters: targetAdapters });
+  if (options.command === "uninstall") return uninstall(options, targetAdapters);
   return options.dryRun ? previewRouting(contract, { target: options.target, adapters: targetAdapters }) : installRouting(contract, { target: options.target, adapters: targetAdapters });
 }
 
