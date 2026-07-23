@@ -2,7 +2,9 @@
 
 [한국어](README.ko.md)
 
-> **Status: v0.1.0 is published to npm.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
+> **Status: v0.2.0 is published to npm.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
+>
+> **Upgrading from v0.1.0 requires reinstalling.** The report schema and the guard argument contract both changed, and upgrading the package does not rewrite anything already installed. Until you reinstall a scope, its guard denies every Agent spawn with a self-describing error naming the layer to reinstall. See [CHANGELOG.md](CHANGELOG.md).
 
 OrbitLane is an open-source **routing contract compiler** that compiles one role-to-model routing contract into runtime-native configuration for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and a Claude Code-scoped spawn guard. A general-purpose runtime model router is the Tier 2 roadmap.
 

@@ -2,7 +2,9 @@
 
 [English](README.md)
 
-> **상태: v0.1.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
+> **상태: v0.2.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
+>
+> **v0.1.0에서 올라올 때는 재설치가 필요합니다.** report schema와 guard 인자 계약이 함께 바뀌었고, 패키지 업그레이드만으로는 이미 설치된 것이 갱신되지 않습니다. 재설치하기 전까지 해당 scope의 guard는 모든 Agent spawn을 거부하며, 어느 레이어를 재설치해야 하는지 오류에 명시합니다. [CHANGELOG.md](CHANGELOG.md) 참고.
 
 OrbitLane은 하나의 역할-모델 라우팅 계약을 Codex/OMX와 Claude Code의 네이티브 설정으로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 계약 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 Claude Code에 한정된 spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 

@@ -104,6 +104,13 @@ test("README status is consistently post-publish and bounded to Tier 1 plus scop
   assert.match(english, /not a claim of universal runtime enforcement/i);
   assert.match(english, /npx orbitlane install --target codex --contract <path>/);
   assert.match(korean, /npx orbitlane install --target codex --contract <path>/);
+
+  // The advertised version drifted from package.json once already; pin it.
+  const { version } = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+  for (const text of [english, korean]) assert.match(text, new RegExp(`v${version.replace(/\./g, "\\.")}`), `README must advertise v${version}`);
+
+  const changelog = await readFile(resolve(root, "CHANGELOG.md"), "utf8");
+  assert.match(changelog, new RegExp(`^## ${version.replace(/\./g, "\\.")}$`, "m"), `CHANGELOG must have a section for ${version}`);
 });
 
 test("spawn guard decision p95 remains below the 50ms local budget", () => {

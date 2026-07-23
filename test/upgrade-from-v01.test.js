@@ -66,3 +66,37 @@ test("a v0.1 hook entry still lets non-Agent tool calls through", async (t) => {
 
   await child;
 });
+
+test("reinstalling over a v0.1 layout replaces the old hook entry instead of stacking one", async (t) => {
+  const { directory } = await fixture(t);
+  const { readFile } = await import("node:fs/promises");
+  const cli = fileURLToPath(new URL("../bin/orbitlane.js", import.meta.url));
+  const projectRoot = join(directory, "repo");
+  const legacyCommand = "'node' '/evicted/pkg/src/guards/claude-spawn-hook.js' 'base64:b2xk'";
+
+  // A v0.1 install: report without a schema version, and a settings entry whose
+  // ownership can only be proven through the report's guard_command receipt.
+  await mkdir(join(projectRoot, ".orbitlane"), { recursive: true });
+  await mkdir(join(projectRoot, ".claude"), { recursive: true });
+  await writeFile(join(projectRoot, ".orbitlane", "claude-report.json"), `${JSON.stringify({ adapter: "claude-code", tier: "tier1", settings_projection: { guard_command: legacyCommand } })}\n`, "utf8");
+  await writeFile(join(projectRoot, ".claude", "settings.json"), `${JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Agent", hooks: [{ type: "command", command: legacyCommand }] }] } }, null, 2)}\n`, "utf8");
+
+  const contractPath = join(directory, "routing.json");
+  await writeFile(contractPath, `${JSON.stringify({
+    contract_version: "1.0.0",
+    lanes: { sol: { class: "judgment", reasoning: "high" }, terra: { class: "implementation", reasoning: "medium" }, luna: { class: "bounded-retrieval", reasoning: "low" } },
+    roles: { executor: { lane: "terra", provenance: "user-approved" } },
+    targets: { claude: { lanes: { terra: { model: "claude-terra", provenance: "fixture" } } } },
+  })}\n`, "utf8");
+
+  await execFileAsync(process.execPath, [cli, "install", "--target", "claude", "--config-root", projectRoot, "--contract", contractPath], { encoding: "utf8" });
+
+  const settings = JSON.parse(await readFile(join(projectRoot, ".claude", "settings.json"), "utf8"));
+  const commands = settings.hooks.PreToolUse.flatMap((entry) => entry.hooks).map((entry) => entry.command);
+  assert.equal(commands.length, 1, "the v0.1 entry must be replaced, not joined by a second guard");
+  assert.notEqual(commands[0], legacyCommand);
+
+  const report = JSON.parse(await readFile(join(projectRoot, ".orbitlane", "claude-report.json"), "utf8"));
+  assert.equal(report.schema_version, 2);
+  assert.match(report.contract_snapshot.sha256, /^[a-f0-9]{64}$/);
+});
