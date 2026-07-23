@@ -89,6 +89,8 @@ OrbitLane은 workflow 문장에 특정 vendor의 현재 model 이름을 고정�
 
 Lane은 canonical id(`sol` / `terra` / `luna`)와 `class`(judgment / implementation / bounded-retrieval) 두 층으로 표현하며, 공개 예시에는 provider model 이름을 고정하지 않습니다. Adapter는 각 lane을 contract의 선택적 per-target binding, 없으면 runtime의 공식 default(lane class 기준)로 해석하고 그 근거를 기록하며, 모호하면 추측하지 않고 실패합니다. Contract가 라우팅하는 역할은 provenance로 분류할 때까지(또는 `--strict`에서) 검증에 실패하고, 라우팅하지 않는 installed role은 `unmanaged`로 보고하며 건드리지 않습니다.
 
+Target별 policy projection은 canonical lane 이름을 모델처럼 노출하지 않고, 해석된 실제 target 모델을 역할별로 기록합니다. 예를 들어 Claude projection은 `architect="opus"`, `executor="sonnet"`, `explore="haiku"`처럼 표시할 수 있습니다. 이는 요청된 configuration이며, 실제 실행 모델이 증명됐다는 뜻은 아닙니다.
+
 ## Enforcement tier
 
 OrbitLane은 유용한 라우팅과 runtime 증거가 필요한 주장을 분리합니다.

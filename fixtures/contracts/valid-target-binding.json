@@ -12,7 +12,7 @@
     "claude": {
       "lanes": {
         "sol": {
-          "model": "claude-opus",
+          "model": "opus",
           "provenance": "user-local"
         }
       }

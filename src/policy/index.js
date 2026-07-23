@@ -1,6 +1,8 @@
 import { assertCatalogCompatible } from "../catalog/index.js";
 import { validateContract } from "../schema/index.js";
 
+const CANONICAL_LANE_IDS = new Set(["sol", "terra", "luna"]);
+
 const POLICY_LINES = Object.freeze([
   "OrbitLane policy projection for {target}.",
   "Policy projection only; it is not runtime router code.",
@@ -34,21 +36,30 @@ const DELEGATION_DECISION_FIXTURES = Object.freeze([
   Object.freeze({ scenario: "$subagent-driven-development with overlapping write scope", expected: "ROUTE_CONFLICT", policyText: "With $subagent-driven-development and overlapping write scope, record ROUTE_CONFLICT." }),
 ]);
 
-export function projectPolicy({ target, contract }) {
+export function projectPolicy({ target, contract, routes }) {
   if (target !== "codex" && target !== "claude") throw new TypeError("target must be codex or claude");
   const validation = validateContract(contract);
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
   assertCatalogCompatible(contract);
-  const routes = Object.entries(contract.roles).sort(([left], [right]) => left.localeCompare(right)).map(([role, config]) => `${role}=${config.lane}`).join(", ");
-  return `${POLICY_LINES.map((line) => line.replace("{target}", target)).join("\n")}\n${DELEGATION_DECISION_FIXTURES.map((fixture) => fixture.policyText).join("\n")}\nContract routes: ${routes}.\n`;
+  const projectedRoutes = Object.entries(contract.roles).sort(([left], [right]) => left.localeCompare(right))
+    .map(([role, config]) => {
+      const route = routes?.[role];
+      const model = route?.model;
+      if (typeof model !== "string" || model.length === 0) throw new TypeError(`UNRESOLVED_TARGET_MODEL: ${role}`);
+      if (route.target !== target || route.lane !== config.lane || /\s/.test(model) || CANONICAL_LANE_IDS.has(model)) {
+        throw new TypeError(`INVALID_TARGET_MODEL_ROUTE: ${role}`);
+      }
+      return `${role}=${JSON.stringify(model)}`;
+    }).join(", ");
+  return `${POLICY_LINES.map((line) => line.replace("{target}", target)).join("\n")}\n${DELEGATION_DECISION_FIXTURES.map((fixture) => fixture.policyText).join("\n")}\nTarget model routes: ${projectedRoutes}.\n`;
 }
 
 export function markerBoundedPolicy(target, policy) {
   return `<!-- ORBITLANE:START ${target} -->\n${policy}<!-- ORBITLANE:END ${target} -->\n`;
 }
 
-export function projectMarkerBoundedPolicy({ target, contract }) {
-  return markerBoundedPolicy(target, projectPolicy({ target, contract }));
+export function projectMarkerBoundedPolicy({ target, contract, routes }) {
+  return markerBoundedPolicy(target, projectPolicy({ target, contract, routes }));
 }
 
 export function delegationDecisionFixtures() {
