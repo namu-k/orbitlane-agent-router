@@ -30,21 +30,30 @@ async function appendJsonLine(path, entry) {
   await appendFile(path, `${JSON.stringify(entry)}\n`, "utf8");
 }
 
-export async function runClaudeSpawnGuard({ input, contract, runtimeDefaults, evidencePath, correlationId, appendHeartbeat, now = () => new Date().toISOString() }) {
+export async function runClaudeSpawnGuard({ input, contract, runtimeDefaults, evidencePath, correlationId, appendHeartbeat, now = () => new Date().toISOString(), scope, contractSha256, reportPath, resolverPolicyVersion }) {
+  let result;
   try {
-    const result = evaluateClaudeAgentSpawn({ input, contract, runtimeDefaults });
-    const heartbeat = Object.freeze({
-      correlation_id: correlationId ?? null,
-      timestamp: now(),
-      decision: result.decision,
-      reason: result.reason,
-      effective_model: "unproven",
-    });
-    await (appendHeartbeat ?? ((entry) => appendJsonLine(evidencePath, entry)))(heartbeat);
-    return result;
-  } catch {
-    return Object.freeze({ exitCode: 0, decision: "fail-open", reason: "GUARD_ERROR", effective_model: "unproven" });
+    result = evaluateClaudeAgentSpawn({ input, contract, runtimeDefaults });
+  } catch (error) {
+    result = Object.freeze({ exitCode: 2, decision: "deny", reason: error.code ?? "GUARD_ERROR", effective_model: "unproven" });
   }
+  const heartbeat = Object.freeze({
+    correlation_id: correlationId ?? null,
+    timestamp: now(),
+    decision: result.decision,
+    reason: result.reason,
+    effective_model: "unproven",
+    selected_scope: scope ?? null,
+    contract_sha256: contractSha256 ?? null,
+    report_path: reportPath ?? null,
+    resolver_policy_version: resolverPolicyVersion ?? null,
+  });
+  try {
+    await (appendHeartbeat ?? ((entry) => appendJsonLine(evidencePath, entry)))(heartbeat);
+  } catch {
+    return Object.freeze({ ...result, heartbeat_recorded: false });
+  }
+  return Object.freeze({ ...result, heartbeat_recorded: true });
 }
 
 export function auditClaudeSpawnGuard({ expectedCorrelationIds = [], heartbeats = [] }) {
