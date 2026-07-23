@@ -66,19 +66,16 @@ the nearest project report wins, and the global report is used only when no
 project report exists. A project therefore overrides the global baseline
 without the two guards disagreeing.
 
-### Support boundary
+### What install writes
 
-The global Claude guard requires a persistent package installation:
+Installing the Claude target copies the guard runtime next to the report it
+reads, under `<config root>/.orbitlane/hook/`, and points the hook at that copy.
+The installed guard therefore keeps deciding after the package that installed it
+is gone, which is the normal end state for `npx` and `dlx`. `npx orbitlane
+install` is supported for every target and both layers.
 
-```bash
-npm install -g orbitlane
-orbitlane install --global --target claude --contract ./contract.json
-```
-
-Running it through `npx` or `dlx` is refused with `EPHEMERAL_PACKAGE_ROOT`,
-because the installed hook stores an absolute path into a cache that can be
-evicted. Every other command, including `--global --target codex`, works fine
-under `npx`.
+Uninstalling the Claude target reclaims that copy along with the snapshot store.
+The heartbeat log is evidence and is left in place.
 
 ## How coding-agent model routing works
 

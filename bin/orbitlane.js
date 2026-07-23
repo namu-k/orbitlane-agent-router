@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFile, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,10 +13,36 @@ import { installRouting, previewRouting, recoverRouting, uninstallRouting } from
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = new Set(["codex", "claude", "both"]);
-const EPHEMERAL_SEGMENTS = new Set(["_npx", "_cacache", ".npm"]);
 
-function packageRootIsEphemeral() {
-  return PACKAGE_ROOT.split(/[\\/]/).some((segment) => EPHEMERAL_SEGMENTS.has(segment));
+// The installed hook must keep working after the package that installed it is gone,
+// which is the normal end state for npx and dlx. Rather than storing an absolute path
+// into an evictable cache, install copies the runtime next to the report it reads.
+function vendoredHookPath(root) {
+  const path = join(root, ".orbitlane", "hook", "guards", "claude-spawn-hook.js");
+  // node has to receive this as a real path, so unlike the other guard arguments it
+  // cannot be base64. POSIX single quoting makes any byte literal, but cmd expands
+  // %VAR% even inside double quotes, so such a path could never launch correctly.
+  if (process.platform === "win32" && path.includes("%")) {
+    throw Object.assign(new Error(`UNSAFE_INSTALL_PATH: ${path} contains % which cmd would expand`), { code: "UNSAFE_INSTALL_PATH" });
+  }
+  return path;
+}
+
+async function vendorHookRuntime(root) {
+  const destination = join(root, ".orbitlane", "hook");
+  const staged = join(root, ".orbitlane", `.hook-${randomUUID()}`);
+  try {
+    await cp(join(PACKAGE_ROOT, "src"), staged, { recursive: true });
+    // The copy leaves the package's module scope behind. Without this the nearest
+    // ancestor package.json decides the module type, and in a project that declares
+    // CommonJS every import in the hook would fail.
+    await writeFile(join(staged, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`, "utf8");
+    await rm(destination, { recursive: true, force: true });
+    await rename(staged, destination);
+  } catch (error) {
+    await rm(staged, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 function usage() {
@@ -93,12 +120,9 @@ function adapters(contract, options) {
   }
   if (selected.includes("claude")) {
     try {
-      if (options.global === true && packageRootIsEphemeral()) {
-        throw Object.assign(new Error("EPHEMERAL_PACKAGE_ROOT: install orbitlane persistently (npm i -g orbitlane) before using --global with the Claude guard"), { code: "EPHEMERAL_PACKAGE_ROOT" });
-      }
       result.claude = createClaudeTier1Adapter(contract, {
         ...claudePaths,
-        spawnGuardCommand: guardCommand(process.execPath, join(PACKAGE_ROOT, "src", "guards", "claude-spawn-hook.js"), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+        spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
         runtimeDefaults,
         contractSha256: options.contractSha256,
         runtimeDefaultsSha256: options.runtimeDefaultsSha256,
@@ -108,15 +132,15 @@ function adapters(contract, options) {
   return Object.freeze(result);
 }
 
-// The snapshot store exists only to back the Claude report's pointer. Once that
-// report is gone nothing can reach these files again, so a successful Claude
-// uninstall reclaims them. The heartbeat log is evidence, not derived state, and is
-// left alone. A cleanup failure is reported but never rewrites the uninstall verdict,
-// which has already been committed by the transaction layer.
-async function reclaimSnapshotStore(options, report) {
+// The snapshot store and the vendored hook runtime exist only to serve the Claude
+// report. Once that report is gone nothing can reach them again, so a successful
+// Claude uninstall reclaims them. The heartbeat log is evidence, not derived state,
+// and is left alone. A cleanup failure is reported but never rewrites the uninstall
+// verdict, which has already been committed by the transaction layer.
+async function reclaimDerivedState(options, report) {
   if (report?.outcomes?.claude?.status !== "uninstalled") return;
   const root = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot }).claude.root;
-  for (const kind of ["contracts", "runtime-defaults"]) {
+  for (const kind of ["contracts", "runtime-defaults", "hook"]) {
     const path = join(root, ".orbitlane", kind);
     try { await rm(path, { recursive: true, force: true }); } catch (error) {
       process.stderr.write(`SNAPSHOT_CLEANUP_FAILED: ${path} (${error?.code ?? "unknown"})\n`);
@@ -126,7 +150,7 @@ async function reclaimSnapshotStore(options, report) {
 
 async function uninstall(options, targetAdapters) {
   const report = await uninstallRouting({ target: options.target, adapters: targetAdapters });
-  await reclaimSnapshotStore(options, report);
+  await reclaimDerivedState(options, report);
   return report;
 }
 
@@ -151,6 +175,7 @@ async function main() {
   const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot }).claude.root;
   const persist = options.command === "install" && options.dryRun !== true && (options.target === "claude" || options.target === "both");
   const store = persist ? writeSnapshot : (root, kind, content) => planSnapshot(root, kind, content);
+  if (persist) await vendorHookRuntime(claudeRoot);
   const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
   const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
   const targetAdapters = adapters(contract, { ...options, runtimeDefaults, contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 });

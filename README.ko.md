@@ -65,18 +65,16 @@ OrbitLane은 두 레이어로 설치한다. 두 런타임 모두 전역과 프�
 최근접 프로젝트 report가 이기고, 프로젝트 report가 없을 때만 전역 report를 쓴다.
 따라서 프로젝트가 전역 baseline을 override하면서도 두 guard의 판정이 갈리지 않는다.
 
-### 지원 경계
+### install이 기록하는 것
 
-전역 Claude guard는 persistent package install을 요구한다.
+Claude target을 설치하면 guard runtime을 그것이 읽을 report 옆인
+`<config root>/.orbitlane/hook/`으로 복사하고, hook이 그 사본을 가리키게 한다.
+따라서 설치한 패키지가 사라진 뒤에도 guard는 계속 판정한다. 이는 `npx`와 `dlx`의
+정상적인 최종 상태다. `npx orbitlane install`은 모든 target과 두 레이어 모두에서
+지원한다.
 
-```bash
-npm install -g orbitlane
-orbitlane install --global --target claude --contract ./contract.json
-```
-
-`npx`나 `dlx`로 실행하면 `EPHEMERAL_PACKAGE_ROOT`로 거부한다. 설치된 hook이
-제거될 수 있는 캐시의 절대경로를 저장하기 때문이다. `--global --target codex`를
-포함한 다른 모든 명령은 `npx`에서 정상 동작한다.
+Claude target을 uninstall하면 그 사본과 snapshot 저장소를 함께 회수한다.
+heartbeat 로그는 증거이므로 남긴다.
 
 ## 코딩 에이전트 모델 라우팅의 작동 방식
 
