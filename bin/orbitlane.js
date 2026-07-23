@@ -5,13 +5,14 @@ import { fileURLToPath } from "node:url";
 
 import { createClaudeTier1Adapter } from "../src/adapters/claude/index.js";
 import { createCodexTier1Adapter } from "../src/adapters/codex/index.js";
+import { resolveTargetPaths } from "../src/config/paths.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = new Set(["codex", "claude", "both"]);
 
 function usage() {
-  return "Usage: orbitlane <install|uninstall|recover> --target <codex|claude|both> --contract <path> [--config-root <path>] [--runtime-defaults <path>] [--dry-run]";
+  return "Usage: orbitlane <install|uninstall|recover> --target <codex|claude|both> --contract <path> [--global] [--config-root <path>] [--runtime-defaults <path>] [--dry-run]";
 }
 
 function parse(argv) {
@@ -21,13 +22,14 @@ function parse(argv) {
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
     if (token === "--dry-run") options.dryRun = true;
+    else if (token === "--global") options.global = true;
     else if (["--target", "--contract", "--config-root", "--runtime-defaults", "--manifest"].includes(token)) options[token.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = rest[++index];
-    else throw new TypeError(`UNKNOWN_OPTION: ${token}`);
+    else throw Object.assign(new TypeError(`UNKNOWN_OPTION: ${token}`), { code: "UNKNOWN_OPTION" });
   }
-  if (!["install", "uninstall", "recover"].includes(command)) throw new TypeError(`UNKNOWN_COMMAND: ${command}`);
-  if (command !== "recover" && !targets.has(options.target)) throw new TypeError("TARGET_REQUIRED: codex, claude, or both");
-  if (command !== "recover" && typeof options.contract !== "string") throw new TypeError("CONTRACT_REQUIRED");
-  if (command === "recover" && typeof options.manifest !== "string") throw new TypeError("MANIFEST_REQUIRED");
+  if (!["install", "uninstall", "recover"].includes(command)) throw Object.assign(new TypeError(`UNKNOWN_COMMAND: ${command}`), { code: "UNKNOWN_COMMAND" });
+  if (command !== "recover" && !targets.has(options.target)) throw Object.assign(new TypeError("TARGET_REQUIRED: codex, claude, or both"), { code: "TARGET_REQUIRED" });
+  if (command === "install" && typeof options.contract !== "string") throw Object.assign(new TypeError("CONTRACT_REQUIRED"), { code: "CONTRACT_REQUIRED" });
+  if (command === "recover" && typeof options.manifest !== "string") throw Object.assign(new TypeError("MANIFEST_REQUIRED"), { code: "MANIFEST_REQUIRED" });
   return Object.freeze({ command, ...options });
 }
 
@@ -53,11 +55,11 @@ function failedAdapter(error, paths) {
 }
 
 function adapters(contract, options) {
-  const root = resolve(options.configRoot ?? process.cwd());
+  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot });
+  const codexPaths = resolved.codex;
+  const claudePaths = resolved.claude;
   const runtimeDefaults = options.runtimeDefaults === undefined ? undefined : options.runtimeDefaults;
-  const generated = join(root, ".orbitlane");
-  const codexPaths = { instructionPath: join(root, "AGENTS.md"), generatedPath: join(generated, "codex-report.json") };
-  const claudePaths = { instructionPath: join(root, "CLAUDE.md"), generatedPath: join(generated, "claude-report.json"), settingsPath: join(root, ".claude", "settings.json") };
+  const generated = join(resolved.claude.root, ".orbitlane");
   const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
   const result = {};
   if (selected.includes("codex")) {
