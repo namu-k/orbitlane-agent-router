@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -131,4 +131,62 @@ test("a tampered snapshot denies", async (t) => {
     resolveEffectiveContract({ cwd: join(directory, "nowhere"), claudeConfigDir: globalRoot }),
     (error) => error.code === "SNAPSHOT_HASH_MISMATCH",
   );
+});
+
+test("an unreadable project report denies instead of falling back to global", { skip: process.getuid?.() === 0 ? "chmod cannot deny root" : false }, async (t) => {
+  const directory = await base(t);
+  const globalRoot = join(directory, "home", ".claude");
+  const projectRoot = join(directory, "repo");
+  await installReport(globalRoot, { ...contract, roles: { architect: { lane: "sol", provenance: "user-approved" } } });
+  await installReport(projectRoot, contract);
+  const reportPath = join(projectRoot, ".orbitlane", "claude-report.json");
+  await chmod(reportPath, 0o000);
+  t.after(() => chmod(reportPath, 0o600).catch(() => {}));
+
+  await assert.rejects(
+    resolveEffectiveContract({ cwd: projectRoot, claudeConfigDir: globalRoot }),
+    (error) => error.code === "REPORT_UNREADABLE" && error.scope === "project" && error.reportPath === reportPath,
+  );
+});
+
+test("a report path that is not a regular file denies at project scope", async (t) => {
+  const directory = await base(t);
+  const globalRoot = join(directory, "home", ".claude");
+  const projectRoot = join(directory, "repo");
+  await installReport(globalRoot, contract);
+  await mkdir(join(projectRoot, ".orbitlane", "claude-report.json"), { recursive: true });
+
+  await assert.rejects(
+    resolveEffectiveContract({ cwd: projectRoot, claudeConfigDir: globalRoot }),
+    (error) => error.code === "REPORT_UNREADABLE" && error.scope === "project",
+  );
+});
+
+test("a present but malformed runtime-defaults pointer denies", async (t) => {
+  const directory = await base(t);
+  const globalRoot = join(directory, "home", ".claude");
+  await installReport(globalRoot, contract, { runtime_defaults_snapshot: { sha256: "not-a-digest" } });
+
+  await assert.rejects(
+    resolveEffectiveContract({ cwd: join(directory, "nowhere"), claudeConfigDir: globalRoot }),
+    (error) => error.code === "REPORT_POINTER_MALFORMED",
+  );
+});
+
+test("a symlinked cwd canonicalises before the ancestor walk", async (t) => {
+  const directory = await base(t);
+  const globalRoot = join(directory, "home", ".claude");
+  const projectRoot = join(directory, "repo");
+  const nested = join(projectRoot, "packages", "app");
+  await mkdir(nested, { recursive: true });
+  await installReport(globalRoot, { ...contract, roles: { architect: { lane: "sol", provenance: "user-approved" } } });
+  const projectSha = await installReport(projectRoot, contract);
+
+  const link = join(directory, "link-to-app");
+  await symlink(nested, link, "dir");
+
+  const resolved = await resolveEffectiveContract({ cwd: link, claudeConfigDir: globalRoot });
+
+  assert.equal(resolved.scope, "project");
+  assert.equal(resolved.contractSha256, projectSha);
 });

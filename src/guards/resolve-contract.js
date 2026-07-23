@@ -8,8 +8,23 @@ export const RESOLVER_POLICY_VERSION = 1;
 const SUPPORTED_SCHEMA_VERSIONS = new Set([2]);
 const DIGEST = /^[a-f0-9]{64}$/;
 
+// Only these errno values mean "no report lives here". Every other failure means a
+// report is present but unusable, which must deny at project scope rather than let
+// the walk continue into the global layer (spec I2: no cross-scope fallback).
+const ABSENT = new Set(["ENOENT", "ENOTDIR"]);
+
 function fail(code, detail, scope, reportPath) {
   return Object.assign(new Error(`${code}: ${detail}`), { code, scope, reportPath });
+}
+
+function pointerDigest(report, key, reportPath, scope) {
+  const pointer = report[key];
+  if (pointer === undefined) return undefined;
+  const digest = pointer?.sha256;
+  if (typeof digest !== "string" || !DIGEST.test(digest)) {
+    throw fail("REPORT_POINTER_MALFORMED", `${reportPath} (${key})`, scope, reportPath);
+  }
+  return digest;
 }
 
 async function nearestProjectReport(start, read) {
@@ -17,9 +32,12 @@ async function nearestProjectReport(start, read) {
   for (;;) {
     const candidate = join(current, ".orbitlane", "claude-report.json");
     try {
-      await read(candidate, "utf8");
-      return candidate;
-    } catch { /* keep walking */ }
+      return Object.freeze({ path: candidate, raw: await read(candidate, "utf8") });
+    } catch (error) {
+      if (!ABSENT.has(error?.code)) {
+        throw fail("REPORT_UNREADABLE", `${candidate} (${error?.code ?? "unknown"})`, "project", candidate);
+      }
+    }
     const parent = dirname(current);
     if (parent === current) return undefined;
     current = parent;
@@ -30,20 +48,22 @@ export async function resolveEffectiveContract({ cwd, claudeConfigDir, readFile 
   let start = cwd;
   try { start = await realpath(cwd); } catch { start = cwd; }
 
-  const projectReportPath = await nearestProjectReport(start, readFile);
-  const scope = projectReportPath === undefined ? "global" : "project";
-  const reportPath = projectReportPath ?? join(claudeConfigDir, ".orbitlane", "claude-report.json");
+  const project = await nearestProjectReport(start, readFile);
+  const scope = project === undefined ? "global" : "project";
+  const reportPath = project?.path ?? join(claudeConfigDir, ".orbitlane", "claude-report.json");
 
-  let raw;
-  try { raw = await readFile(reportPath, "utf8"); } catch { throw fail("REPORT_UNREADABLE", reportPath, scope, reportPath); }
+  let raw = project?.raw;
+  if (raw === undefined) {
+    try { raw = await readFile(reportPath, "utf8"); } catch (error) { throw fail("REPORT_UNREADABLE", `${reportPath} (${error?.code ?? "unknown"})`, scope, reportPath); }
+  }
 
   let report;
   try { report = JSON.parse(raw); } catch { throw fail("REPORT_CORRUPT", reportPath, scope, reportPath); }
 
   if (!SUPPORTED_SCHEMA_VERSIONS.has(report.schema_version)) throw fail("UNSUPPORTED_REPORT_SCHEMA", reportPath, scope, reportPath);
 
-  const contractSha256 = report.contract_snapshot?.sha256;
-  if (typeof contractSha256 !== "string" || !DIGEST.test(contractSha256)) throw fail("REPORT_POINTER_MISSING", reportPath, scope, reportPath);
+  if (report.contract_snapshot === undefined) throw fail("REPORT_POINTER_MISSING", reportPath, scope, reportPath);
+  const contractSha256 = pointerDigest(report, "contract_snapshot", reportPath, scope);
 
   const root = dirname(dirname(reportPath));
 
@@ -57,10 +77,8 @@ export async function resolveEffectiveContract({ cwd, claudeConfigDir, readFile 
 
   const contract = await load("contracts", contractSha256);
 
-  const runtimeDefaultsSha256 = report.runtime_defaults_snapshot?.sha256;
-  const runtimeDefaults = typeof runtimeDefaultsSha256 === "string" && DIGEST.test(runtimeDefaultsSha256)
-    ? await load("runtime-defaults", runtimeDefaultsSha256)
-    : undefined;
+  const runtimeDefaultsSha256 = pointerDigest(report, "runtime_defaults_snapshot", reportPath, scope);
+  const runtimeDefaults = runtimeDefaultsSha256 === undefined ? undefined : await load("runtime-defaults", runtimeDefaultsSha256);
 
   return Object.freeze({ scope, reportPath, contract, runtimeDefaults, contractSha256, resolverPolicyVersion: RESOLVER_POLICY_VERSION });
 }
