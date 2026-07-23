@@ -37,7 +37,7 @@ Codex 전역은 `~/.codex/AGENTS.md`이므로 `--config-root ~/.codex`로 이미
 
 Claude Code는 일치하는 훅을 모두 실행하고 가장 제한적인 결정을 적용한다. 따라서 전역 guard와 프로젝트 guard가 서로 다른 계약을 들고 있으면, 전역 guard가 프로젝트 전용 역할을 거부한다. 프로젝트 정책이 전역 정책을 override하지 못한다.
 
-근본 원인은 훅이 두 개라는 사실이 아니라 **계약이 설치 시점에 박제된다**는 점이다.
+근본 원인은 훅이 두 개라는 사실이 아니라 **각 훅이 설치 시점의 서로 다른 scope-local 계약에 직접 결합된다**는 점이다. v3도 snapshot 자체는 의도적으로 불변 고정하지만, 훅이 결합하는 대상을 snapshot에서 런타임 resolver로 옮긴다.
 
 ### 2.3 트랜잭션 밖 계약 덮어쓰기
 
@@ -45,7 +45,9 @@ Claude Code는 일치하는 훅을 모두 실행하고 가장 제한적인 결�
 
 ### 2.4 포괄적 fail-open
 
-`src/guards/claude-spawn-hook.js:32-34`의 `catch { process.exitCode = 0; }`는 계약이 없거나 손상돼도 조용히 허용한다. 도구의 fail-closed 정체성과 모순된다.
+fail-open이 두 겹으로 존재한다. 외곽 훅의 `catch { process.exitCode = 0; }`(`src/guards/claude-spawn-hook.js:32-34`)와 `runClaudeSpawnGuard`의 `catch`(`src/guards/claude-spawn.js:45-47`)다. 계약이 없거나 손상돼도 조용히 허용하며, 도구의 fail-closed 정체성과 모순된다.
+
+내부 catch는 평가와 heartbeat 기록을 함께 감싸므로, deny 판정이 기록 실패에 의해 allow로 뒤집히는 경로가 존재한다. 상세는 4.6에서 다룬다.
 
 ## 3. 핵심 설계
 
@@ -125,15 +127,31 @@ v3는 순서를 뒤집는다.
 1. `tool_name !== "Agent"`이면 즉시 exit 0. OrbitLane의 관할이 아니다.
 2. 그 다음에만 계약을 해석하고, 이 지점부터 fail-closed를 적용한다.
 
+### 4.6 오류 행렬
+
+fail-open은 **두 겹**으로 존재한다. 외곽 훅(`src/guards/claude-spawn-hook.js:32-34`)과 `runClaudeSpawnGuard` 내부(`src/guards/claude-spawn.js:45-47`)다. 외곽만 제거하면 resolver 오류가 내부 catch에서 다시 fail-open된다. 구현 위치에 관계없이 다음 행렬을 만족해야 한다.
+
+| 상황 | 결과 |
+| --- | --- |
+| 비-Agent 도구 호출 | exit 0. 계약 해석 이전에 반환한다 |
+| report/snapshot/schema/hash 검증 실패 | exit 2 deny |
+| Agent 입력 오류(`INVALID_AGENT_TOOL_INPUT`) | exit 2 deny |
+| 평가 결과가 deny | exit 2 deny. heartbeat 기록 성공 여부와 무관하다 |
+| heartbeat 기록 실패 | 판정을 바꾸지 않는다. enforcement claim만 철회한다 |
+
+현재 내부 catch는 **평가와 heartbeat 기록을 함께 감싼다.** 그 결과 `evaluateClaudeAgentSpawn`이 deny를 반환해도 heartbeat 쓰기가 실패하면 catch로 넘어가 deny가 allow로 뒤집힌다. v3는 두 관심사를 분리해 평가 오류와 기록 오류가 서로의 결과를 오염시키지 않게 한다.
+
+heartbeat 기록 실패를 fail-closed로 만들지 않는 이유는, 증거 경로가 읽기 전용이거나 디스크가 가득 찬 상황에서 모든 Agent 스폰이 잠기는 편이 더 나쁜 장애이기 때문이다. 대신 `auditClaudeSpawnGuard`가 이미 구현한 `coverage-withdrawn-heartbeat-gap`으로 enforcement 주장을 철회한다. 증명할 수 없는 것을 주장하지 않는다는 도구의 정체성과 일치한다.
+
 ## 5. 불변식
 
 구현은 다음을 반드시 만족한다.
 
 **I1. 동일 `schema_version` 안에서 미지 필드는 의미를 바꾸지 않는다.**
-미지 필드는 report 선택, snapshot 경로 유도, allow/deny 판정에 영향을 주지 않는다. resolver가 요구하는 코어는 최소이며 append-only다(`schema_version`, `contract_snapshot.sha256`). 선택 규칙이나 코어 필드의 의미가 바뀌면 반드시 breaking schema로 올린다. 이 조건이 성립하므로 구버전 guard는 신버전 report에 forward-compatible하며, `resolver_policy_version`은 판정 게이트가 아니라 heartbeat provenance 기록용으로 충분하다.
+미지 필드는 report 선택, snapshot 경로 유도, allow/deny 판정에 영향을 주지 않는다. resolver가 요구하는 코어는 최소이며 append-only다(`schema_version`, `contract_snapshot.sha256`). 여기에 `runtime_defaults_snapshot.sha256`은 **schema v2부터 의미가 고정된 선택 필드**로 포함한다. 이는 미지 필드가 아니라 정의된 optional 필드이며, 부재는 "runtime-defaults 없음"을 뜻하는 확정된 의미를 갖는다. 선택 규칙이나 코어 필드의 의미가 바뀌면 반드시 breaking schema로 올린다. 이 조건이 성립하므로 구버전 guard는 신버전 report에 forward-compatible하며, `resolver_policy_version`은 판정 게이트가 아니라 heartbeat provenance 기록용으로 충분하다.
 
 **I2. 선택된 scope에서 실패하면 다른 scope로 fallback하지 않는다.**
-최근접 project report를 선택한 뒤 손상, pointerless, 해시 불일치, unsupported schema가 발견되면 전역으로 넘어가지 않고 동일하게 deny한다. fallback하면 장애 경로에서 훅마다 판정이 갈리고, 가장 제한적인 결정이 적용되는 규칙 때문에 그대로 충돌이 된다. `src/guards/claude-spawn-hook.js:32-34`의 포괄적 fail-open은 이 경로에서 제거한다.
+최근접 project report를 선택한 뒤 손상, pointerless, 해시 불일치, unsupported schema가 발견되면 전역으로 넘어가지 않고 동일하게 deny한다. fallback하면 장애 경로에서 훅마다 판정이 갈리고, 가장 제한적인 결정이 적용되는 규칙 때문에 그대로 충돌이 된다. 포괄적 fail-open은 **두 겹 모두**에서 제거한다(`src/guards/claude-spawn-hook.js:32-34`와 `src/guards/claude-spawn.js:45-47`). 구체적 경계는 4.6의 오류 행렬을 따른다.
 
 **I3. 오류 안내는 선택된 scope에 맞춘다.**
 project report 문제는 해당 프로젝트 재설치를, global report 문제는 `orbitlane install --global`을 안내한다. 출력에는 `selected_scope`, `report_path`, 오류 코드를 함께 싣는다. 예: `UNSUPPORTED_REPORT_SCHEMA`는 자기설명적 사유와 함께 거부해 장애가 스스로 해법을 알리게 한다.
@@ -150,6 +168,30 @@ settings의 임의 hook을 제거하지 않는다. 소유권을 증명할 수 �
 따라서 bin이 Tier1 어댑터 대신 **receipt 기반 경량 uninstall 어댑터**를 만든다. 필요한 것은 경로와 report에서 읽은 검증된 `guard_command`뿐이며, `runTarget`과 `uninstallDiff`가 요구하는 필드는 그것으로 충분하다. `previousGuardCommand`(`src/installer/index.js:107`)가 이미 receipt에서 이전 command를 읽으므로 소유 항목 제거는 지원된다.
 
 이 조건에서 **installer 트랜잭션 계층은 변경하지 않는다.**
+
+### 6.1 `--contract` 선택화 범위
+
+- **install에서는 모든 target에 `--contract`가 필수다.** 선택화는 uninstall에만 적용한다.
+- **uninstall에서는 codex, claude, both 모두 생략 가능하다.** `createCodexTier1Adapter`도 생성 시점에 `resolveCodexRequestedRoutes`를 호출해 계약 없이는 throw하므로(`src/adapters/codex/index.js`), receipt 기반 경량 어댑터는 두 target 모두에 필요하다. Codex는 guard가 없으므로 경로 두 개만으로 충분하다.
+- `--contract`를 명시하면 기존 경로를 그대로 사용한다. 생략했을 때만 receipt 경로로 진입한다.
+- **both에서는 각 target의 receipt를 독립적으로 검증한다.** 한쪽 receipt가 없거나 손상돼도 다른 쪽 uninstall을 막지 않는다. 이는 설치 경로의 target 간 격리 원칙과 동일하다.
+
+### 6.2 "검증된 `guard_command`"의 조건
+
+다음을 **모두** 만족할 때만 소유가 증명된 것으로 본다.
+
+1. report가 JSON으로 파싱된다.
+2. `settings_projection.guard_command`가 비어 있지 않은 문자열이다.
+3. 그 문자열이 현재 `settings.json`의 `PreToolUse` Agent 항목에 **정확히 일치**하는 형태로 존재한다.
+
+정확히 일치하는 소유 항목만 제거한다. 유사 항목이나 추정 매칭은 하지 않는다.
+
+### 6.3 snapshot 손상과 receipt 손상의 구분
+
+두 실패를 구분한다.
+
+- **snapshot이 사라졌거나 손상됨, receipt는 검증 가능**: uninstall을 진행한다. 훅 항목과 정책 블록을 제거하는 데 계약 내용은 필요 없고, 소유 증명은 6.2로 충족되기 때문이다.
+- **receipt가 없거나 손상됨**: I4에 따라 명시적으로 실패한다. settings의 어떤 hook도 건드리지 않는다. 소유를 증명할 수 없으면 아무것도 지우지 않는다.
 
 전역 uninstall은 Claude uninstall이 성공한 뒤에만 소유 snapshot을 정리한다.
 
@@ -174,9 +216,9 @@ README는 일반 npx 사용과, persistent runtime이 필요한 global Claude gu
 
 ## 9. legacy 처리
 
-v0.1 report에는 포인터가 없다. 마이그레이션 심은 만들지 않는다. 패키지가 방금 배포되어 실사용 기반이 사실상 없고, 현존하는 전역 report는 codex 것인데 codex에는 guard가 없다.
+v0.1의 pointerless report는 **pre-1.0 breaking migration 대상으로 지원하지 않는다.** 해당 scope를 재설치해야 하며, release note와 scope-specific 오류로 안내한다.
 
-포인터 없는 report를 발견하면 I2와 I3에 따라 자기설명적 fail-closed로 처리한다.
+마이그레이션 심은 만들지 않는다. 포인터 없는 report를 발견하면 I2와 I3에 따라 자기설명적 fail-closed로 처리한다.
 
 ## 10. 테스트
 
@@ -192,9 +234,24 @@ v0.1 report에는 포인터가 없다. 마이그레이션 심은 만들지 않�
 - `HOME`, `USERPROFILE`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`을 **전부** 임시 디렉터리로 격리한다. `os.homedir()`는 Windows에서 `USERPROFILE`을 읽으므로 `HOME`만 바꾸면 실제 홈이 오염된다.
 - dry-run이 파일시스템을 전혀 변경하지 않음을 assert한다.
 - `--target both`에서 Claude 실패가 Codex 설치를 막지 않음을 확인한다.
-- `--contract` 없는 uninstall, receipt 손상 시 명시적 실패(I4).
-- 휘발성 `PACKAGE_ROOT`에서 `--global` 거부.
+- `--contract` 없는 uninstall(codex/claude/both), receipt 손상 시 명시적 실패(I4), snapshot만 손상된 경우에는 uninstall 진행(6.3).
+- `both` uninstall에서 한쪽 receipt 손상이 다른 쪽 제거를 막지 않음(6.1).
 - 오류 출력에 `selected_scope`, `report_path`, 코드가 포함됨(I3).
+- 4.6 오류 행렬 전체. 특히 **평가가 deny인데 heartbeat 기록이 실패해도 deny가 유지되는지**, 비-Agent 호출이 계약 상태와 무관하게 exit 0인지.
+
+**`EPHEMERAL_PACKAGE_ROOT` 범위**
+
+- 휘발성 `PACKAGE_ROOT`에서 **global Claude만 거부**한다.
+- 같은 조건에서 **global Codex는 계속 허용**한다. Codex에는 guard가 없어 패키지 경로에 의존하지 않는다.
+- `--target both`에서는 Codex 성공과 Claude 실패가 함께 유지되는지 확인한다.
+
+**rollback/recovery** (v1 두 번째 blocker를 실제로 닫는 핵심 증거)
+
+1. 계약 A로 설치한다.
+2. 계약 B의 snapshot을 생성한 뒤 report/settings commit 중 실패를 주입한다.
+3. rollback 후 report가 여전히 A를 가리키고, resolver도 A를 선택하는지 확인한다.
+4. 강제 종료(`SIGKILL`) 후 `recover` 경로에서도 동일한 결과인지 확인한다.
+5. B snapshot이 orphan으로 남아도 기존 동작에 영향이 없는지 확인한다.
 
 ## 11. 비범위
 
