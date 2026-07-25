@@ -19,6 +19,23 @@ test("accepts the canonical sol, terra, and luna lane classes", async () => {
   assert.deepEqual(result, { valid: true, errors: [] });
 });
 
+test("a contract with no roles is valid", async () => {
+  const contract = await fixture("valid-canonical.json");
+  delete contract.roles;
+
+  assert.deepEqual(validateContract(contract), { valid: true, errors: [] });
+});
+
+test("a contract with empty roles is invalid", async () => {
+  const contract = await fixture("valid-canonical.json");
+  contract.roles = {};
+
+  const result = validateContract(contract);
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.includes("at least one role when present")));
+});
+
 test("accepts a per-target model binding only when it has provenance", async () => {
   const result = validateContract(await fixture("valid-target-binding.json"));
 

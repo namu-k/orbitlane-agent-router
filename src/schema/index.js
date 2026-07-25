@@ -75,8 +75,11 @@ function validateLanes(lanes, errors) {
 }
 
 function validateRoles(roles, errors) {
+  // Roles are optional: a contract can carry projection only. An empty object is a
+  // mistake rather than an intent, so absent and empty are deliberately different.
+  if (roles === undefined) return;
   if (!isRecord(roles) || Object.keys(roles).length === 0) {
-    errors.push("roles must contain at least one role");
+    errors.push("roles must contain at least one role when present");
     return;
   }
 

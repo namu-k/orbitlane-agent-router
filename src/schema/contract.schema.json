@@ -3,7 +3,7 @@
   "$id": "https://orbitlane.dev/schema/contract-1.0.0.json",
   "title": "OrbitLane routing contract",
   "type": "object",
-  "required": ["contract_version", "lanes", "roles"],
+  "required": ["contract_version", "lanes"],
   "additionalProperties": false,
   "properties": {
     "contract_version": { "const": "1.0.0" },

@@ -31,6 +31,15 @@ test("contract.schema.json lane consts match the enforced canonical lanes", asyn
   }
 });
 
+test("the JSON schema and validateRoles agree on absent versus empty roles", async () => {
+  const contractSchema = JSON.parse(
+    await readFile(new URL("../../src/schema/contract.schema.json", import.meta.url), "utf8"),
+  );
+
+  assert.ok(!contractSchema.required.includes("roles"), "roles must not be required by the JSON schema");
+  assert.equal(contractSchema.properties.roles.minProperties, 1, "an empty roles object must stay invalid");
+});
+
 test("capability-matrix.schema.json reasoning consts match the enforced capability", async () => {
   const capabilitySchema = await schema("capability-matrix.schema.json");
   const { reasoning } = claudeCapabilityMatrix();
