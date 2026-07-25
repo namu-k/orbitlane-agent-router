@@ -52,6 +52,39 @@ test("rejects an untrusted runtime default and records official release evidence
   assert.deepEqual(routes.executor.release, runtimeDefaults.release);
 });
 
+test("a role resolves even when other lanes are unbound", () => {
+  const partial = {
+    contract_version: "1.0.0",
+    lanes: {
+      sol: { class: "judgment", reasoning: "high" },
+      terra: { class: "implementation", reasoning: "medium" },
+      luna: { class: "bounded-retrieval", reasoning: "low" },
+    },
+    roles: { executor: { lane: "terra", provenance: "user-approved" } },
+    targets: { claude: { lanes: { terra: { model: "sonnet", provenance: "user-local" } } } },
+  };
+
+  const routes = resolveClaudeRequestedRoutes(partial);
+
+  assert.equal(routes.executor.model, "sonnet");
+  assert.equal(routes.executor.modelSource, "target-binding");
+});
+
+test("a routed role whose own lane is unbound still fails", () => {
+  const partial = {
+    contract_version: "1.0.0",
+    lanes: {
+      sol: { class: "judgment", reasoning: "high" },
+      terra: { class: "implementation", reasoning: "medium" },
+      luna: { class: "bounded-retrieval", reasoning: "low" },
+    },
+    roles: { architect: { lane: "sol", provenance: "user-approved" } },
+    targets: { claude: { lanes: { terra: { model: "sonnet", provenance: "user-local" } } } },
+  };
+
+  assert.throws(() => resolveClaudeRequestedRoutes(partial), /AMBIGUOUS_MODEL_RESOLUTION: architect/);
+});
+
 test("reports native projection capability only when supported runtime and native artifacts are present", () => {
   assert.deepEqual(probeClaudeTier1Capabilities({
     runtime: { available: true, version: "1.0.0" },

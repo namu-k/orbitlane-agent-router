@@ -22,6 +22,24 @@ test("fails closed when a Codex lane lacks both binding and official default", (
   assert.throws(() => resolveCodexRequestedRoutes(contract, { release: { version: "1", source: "official", hash: "a".repeat(64) }, lanes: { implementation: { model: "codex-terra", provenance: "official-default" } } }), { message: "AMBIGUOUS_MODEL_RESOLUTION: explore" });
 });
 
+test("codex refuses a runtime default from a non-official release", () => {
+  const contract = {
+    contract_version: "1.0.0",
+    lanes: {
+      sol: { class: "judgment", reasoning: "high" },
+      terra: { class: "implementation", reasoning: "medium" },
+      luna: { class: "bounded-retrieval", reasoning: "low" },
+    },
+    roles: { executor: { lane: "terra", provenance: "user-approved" } },
+  };
+  const unofficial = {
+    release: { version: "1.0.0", source: "vendored", hash: "a".repeat(64) },
+    lanes: { implementation: { model: "gpt-5.6-terra", provenance: "runtime" } },
+  };
+
+  assert.throws(() => resolveCodexRequestedRoutes(contract, unofficial), /AMBIGUOUS_MODEL_RESOLUTION/);
+});
+
 test("emits a Tier 1 report with separate requested receipts and unproven native/effective capability", () => {
   const adapter = createCodexTier1Adapter(contract, {
     instructionPath: "/tmp/AGENTS.md",

@@ -1,4 +1,5 @@
 import { auditInstalledRoles, validateContract } from "../../schema/index.js";
+import { resolveLaneModels } from "../../config/lanes.js";
 import { projectPolicy } from "../../policy/index.js";
 
 const CODEX_CAPABILITY_MATRIX = Object.freeze({
@@ -20,24 +21,16 @@ function assertValidContract(contract) {
 
 export function resolveCodexRequestedRoutes(contract, runtimeDefaults) {
   assertValidContract(contract);
-  const release = runtimeDefaults?.release;
-  const defaults = runtimeDefaults?.lanes;
-  const releaseValid = typeof release?.version === "string" && release.version.length > 0
-    && typeof release?.source === "string" && release.source.length > 0 && /^[a-f0-9]{64}$/.test(release?.hash ?? "");
+  const lanes = resolveLaneModels(contract, "codex", runtimeDefaults);
   const routes = {};
-  for (const [role, configuration] of Object.entries(contract.roles).sort(([left], [right]) => left.localeCompare(right))) {
-    const lane = contract.lanes[configuration.lane];
-    const binding = contract.targets?.codex?.lanes?.[configuration.lane];
-    const defaultBinding = defaults?.[lane.class];
-    const defaultValid = releaseValid && typeof defaultBinding?.model === "string" && defaultBinding.model.length > 0
-      && typeof defaultBinding.provenance === "string" && defaultBinding.provenance.length > 0;
-    const model = binding?.model ?? (defaultValid ? defaultBinding.model : undefined);
-    if (!model) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
+  for (const [role, configuration] of Object.entries(contract.roles ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+    const lane = lanes[configuration.lane];
+    if (lane?.resolved !== true) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
     routes[role] = Object.freeze({
       lane: configuration.lane,
-      model,
-      modelSource: binding ? "target-binding" : "runtime-default",
-      provenance: binding?.provenance ?? defaultBinding?.provenance,
+      model: lane.model,
+      modelSource: lane.modelSource,
+      provenance: lane.provenance,
       reasoning: lane.reasoning,
     });
   }

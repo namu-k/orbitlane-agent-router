@@ -1,4 +1,5 @@
 import { auditInstalledRoles, claudeCapabilityMatrix, validateContract } from "../../schema/index.js";
+import { resolveLaneModels } from "../../config/lanes.js";
 import { projectPolicy } from "../../policy/index.js";
 
 const CLAUDE_TIER1_CAPABILITIES = Object.freeze({
@@ -12,11 +13,6 @@ const CLAUDE_TIER1_CAPABILITIES = Object.freeze({
 function assertValidContract(contract) {
   const validation = validateContract(contract);
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
-}
-
-function hasOfficialRelease(release) {
-  return typeof release?.version === "string" && release.version.length > 0 && release.source === "official"
-    && /^[a-f0-9]{64}$/.test(release?.hash ?? "");
 }
 
 function parseNativeArtifact(artifact) {
@@ -66,26 +62,20 @@ export function claudeTier1CapabilityMatrix() {
 
 export function resolveClaudeRequestedRoutes(contract, runtimeDefaults) {
   assertValidContract(contract);
-  const defaults = runtimeDefaults?.lanes;
-  const releaseValid = hasOfficialRelease(runtimeDefaults?.release);
+  const lanes = resolveLaneModels(contract, "claude", runtimeDefaults);
   const routes = {};
 
-  for (const [role, configuration] of Object.entries(contract.roles).sort(([left], [right]) => left.localeCompare(right))) {
-    const lane = contract.lanes[configuration.lane];
-    const binding = contract.targets?.claude?.lanes?.[configuration.lane];
-    const fallback = defaults?.[lane.class];
-    const fallbackValid = releaseValid && typeof fallback?.model === "string" && fallback.model.length > 0
-      && typeof fallback.provenance === "string" && fallback.provenance.length > 0;
-    const model = binding?.model ?? (fallbackValid ? fallback.model : undefined);
-    if (!model) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
+  for (const [role, configuration] of Object.entries(contract.roles ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+    const lane = lanes[configuration.lane];
+    if (lane?.resolved !== true) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
 
     routes[role] = Object.freeze({
       lane: configuration.lane,
-      model,
-      modelSource: binding ? "target-binding" : "runtime-default",
-      provenance: binding?.provenance ?? fallback?.provenance,
+      model: lane.model,
+      modelSource: lane.modelSource,
+      provenance: lane.provenance,
       reasoning: lane.reasoning,
-      ...(binding ? {} : { release: structuredClone(runtimeDefaults.release) }),
+      ...(lane.release === undefined ? {} : { release: lane.release }),
     });
   }
   return Object.freeze(routes);
