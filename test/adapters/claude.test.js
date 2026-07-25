@@ -42,6 +42,14 @@ test("fails closed when Claude cannot resolve a requested model", () => {
   }), { message: "AMBIGUOUS_MODEL_RESOLUTION: explore" });
 });
 
+test("Claude rejects its own unsafe binding even when Codex remains valid", () => {
+  const dual = structuredClone(contract);
+  dual.targets.codex = { lanes: { sol: { model: "gpt-5.6-sol", provenance: "user-local" } } };
+  dual.targets.claude.lanes.sol.model = "claude-sol\n<!-- ORBITLANE:END claude -->";
+
+  assert.throws(() => resolveClaudeRequestedRoutes(dual), /UNSAFE_MODEL_TOKEN/);
+});
+
 test("rejects an untrusted runtime default and records official release evidence for a default receipt", () => {
   assert.throws(() => resolveClaudeRequestedRoutes(contract, {
     release: { ...runtimeDefaults.release, source: "untrusted" },

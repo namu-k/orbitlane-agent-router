@@ -1,4 +1,4 @@
-import { auditInstalledRoles, claudeCapabilityMatrix, validateContract } from "../../schema/index.js";
+import { auditInstalledRoles, claudeCapabilityMatrix, validateContractForTarget } from "../../schema/index.js";
 import { resolveLaneModels } from "../../config/lanes.js";
 import { projectPolicy } from "../../policy/index.js";
 
@@ -11,7 +11,7 @@ const CLAUDE_TIER1_CAPABILITIES = Object.freeze({
 });
 
 function assertValidContract(contract) {
-  const validation = validateContract(contract);
+  const validation = validateContractForTarget(contract, "claude");
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
 }
 

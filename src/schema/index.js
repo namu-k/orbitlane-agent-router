@@ -32,6 +32,17 @@ const addUnexpectedKeys = (value, allowedKeys, path, errors) => {
 };
 
 export function validateContract(contract) {
+  return validateContractScope(contract);
+}
+
+// Adapters must validate the common contract surface, but a selected target cannot
+// be held hostage by malformed bindings for an independent target. Standalone
+// validation intentionally remains whole-contract via validateContract above.
+export function validateContractForTarget(contract, target) {
+  return validateContractScope(contract, target);
+}
+
+function validateContractScope(contract, target) {
   const errors = [];
 
   if (!isRecord(contract)) {
@@ -46,7 +57,7 @@ export function validateContract(contract) {
 
   validateLanes(contract.lanes, errors);
   validateRoles(contract.roles, errors);
-  validateTargets(contract.targets, errors);
+  validateTargets(contract.targets, errors, target);
 
   return { valid: errors.length === 0, errors };
 }
@@ -105,7 +116,7 @@ function validateRoles(roles, errors) {
   }
 }
 
-function validateTargets(targets, errors) {
+function validateTargets(targets, errors, selectedTarget) {
   if (targets === undefined) {
     return;
   }
@@ -114,7 +125,10 @@ function validateTargets(targets, errors) {
     return;
   }
 
-  for (const [adapter, target] of Object.entries(targets)) {
+  const selected = selectedTarget === undefined
+    ? Object.entries(targets)
+    : Object.hasOwn(targets, selectedTarget) ? [[selectedTarget, targets[selectedTarget]]] : [];
+  for (const [adapter, target] of selected) {
     const targetPath = `targets.${adapter}`;
     if (!isRecord(target)) {
       errors.push(`${targetPath} must be an object`);

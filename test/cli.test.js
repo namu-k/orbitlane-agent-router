@@ -111,10 +111,15 @@ test("CLI preflight rejects unsafe model tokens before Claude vendoring or snaps
   unsafeClaude.targets.claude.lanes.sol.model = "claude-sol\n<!-- ORBITLANE:END claude -->";
   await writeFile(contractPath, `${JSON.stringify(unsafeClaude)}\n`);
 
-  await assert.rejects(invoke(["install", "--target", "claude", "--config-root", configRoot, "--contract", contractPath]), (error) => error.code === 2);
+  await assert.rejects(invoke(["install", "--target", "both", "--config-root", configRoot, "--contract", contractPath]), (error) => {
+    const report = JSON.parse(error.stdout);
+    return error.code === 1 && report.outcomes.codex.status === "installed" && report.outcomes.claude.status === "failed";
+  });
+  assert.match(await readFile(join(configRoot, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/);
   await assert.rejects(readFile(join(configRoot, ".orbitlane", "claude-report.json"), "utf8"));
   await assert.rejects(readFile(join(configRoot, ".orbitlane", "contracts"), "utf8"));
   await assert.rejects(readFile(join(configRoot, ".orbitlane", "hook", "guards", "claude-spawn-hook.js"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".claude", "settings.json"), "utf8"));
 });
 
 test("CLI preflight rejects an invalid contract before any target writes", async (t) => {

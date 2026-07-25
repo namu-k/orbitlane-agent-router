@@ -6,6 +6,7 @@ import {
   auditInstalledRoles,
   claudeCapabilityMatrix,
   validateContract,
+  validateContractForTarget,
   validateCapabilityMatrix,
 } from "../../src/schema/index.js";
 
@@ -89,6 +90,22 @@ test("rejects model strings that cannot safely appear in a marker-bounded projec
       `expected UNSAFE_MODEL_TOKEN for ${JSON.stringify(model)}, got ${result.errors.join(", ")}`,
     );
   }
+});
+
+test("target-scoped validation preserves valid sibling targets without weakening whole-contract validation", async () => {
+  const contract = await fixture("valid-target-binding.json");
+  contract.targets.codex = {
+    lanes: {
+      sol: { model: "gpt-5.6-sol", provenance: "user-local" },
+      terra: { model: "gpt-5.6-terra", provenance: "user-local" },
+      luna: { model: "gpt-5.6-luna", provenance: "user-local" },
+    },
+  };
+  contract.targets.claude.lanes.sol.model = "opus\n<!-- ORBITLANE:END claude -->";
+
+  assert.equal(validateContract(contract).valid, false, "standalone validation remains whole-contract");
+  assert.deepEqual(validateContractForTarget(contract, "codex"), { valid: true, errors: [] });
+  assert.equal(validateContractForTarget(contract, "claude").valid, false);
 });
 
 test("accepts ordinary provider model names", async () => {

@@ -1,6 +1,6 @@
 import { assertCatalogCompatible } from "../catalog/index.js";
 import { resolveLaneModels } from "../config/lanes.js";
-import { isMarkerSafeModelToken, validateContract } from "../schema/index.js";
+import { isMarkerSafeModelToken, validateContractForTarget } from "../schema/index.js";
 
 // The projected kernel. Four lines: a delegation nudge, the main-session boundary
 // (which also carries escalation), this target's tier->model binding, and the one
@@ -17,7 +17,7 @@ const KERNEL_LANES = Object.freeze(["sol", "terra", "luna"]);
 
 export function projectPolicy({ target, contract, runtimeDefaults }) {
   if (target !== "codex" && target !== "claude") throw new TypeError("target must be codex or claude");
-  const validation = validateContract(contract);
+  const validation = validateContractForTarget(contract, target);
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
   // Kept even though the kernel no longer reads roles: a contract that remaps a
   // stable-catalog role to the wrong lane must still be caught here.

@@ -40,6 +40,15 @@ test("codex refuses a runtime default from a non-official release", () => {
   assert.throws(() => resolveCodexRequestedRoutes(contract, unofficial), /AMBIGUOUS_MODEL_RESOLUTION/);
 });
 
+test("Codex routes stay usable when only Claude has an unsafe target binding", () => {
+  const dual = structuredClone(contract);
+  dual.targets.codex.lanes.terra = { model: "codex-terra", provenance: "user-local" };
+  dual.targets.codex.lanes.luna = { model: "codex-luna", provenance: "user-local" };
+  dual.targets.claude = { lanes: { sol: { model: "opus\n<!-- ORBITLANE:END claude -->", provenance: "user-local" } } };
+
+  assert.equal(resolveCodexRequestedRoutes(dual).executor.model, "codex-terra");
+});
+
 test("emits a Tier 1 report with separate requested receipts and unproven native/effective capability", () => {
   const adapter = createCodexTier1Adapter(contract, {
     instructionPath: "/tmp/AGENTS.md",

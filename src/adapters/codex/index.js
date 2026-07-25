@@ -1,4 +1,4 @@
-import { auditInstalledRoles, validateContract } from "../../schema/index.js";
+import { auditInstalledRoles, validateContractForTarget } from "../../schema/index.js";
 import { resolveLaneModels } from "../../config/lanes.js";
 import { projectPolicy } from "../../policy/index.js";
 
@@ -15,7 +15,7 @@ export function codexCapabilityMatrix() {
 }
 
 function assertValidContract(contract) {
-  const validation = validateContract(contract);
+  const validation = validateContractForTarget(contract, "codex");
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
 }
 
