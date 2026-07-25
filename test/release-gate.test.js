@@ -159,8 +159,12 @@ test("the READMEs document the bounded roles-less Claude precedence consequence"
   ]);
 
   assert.match(english, /roles-less guidance-only Claude report.*shadows a roles-bearing global report.*routed spawns.*unmanaged and pass through.*global guard/i);
+  assert.match(english, /This is a bounded scope-precedence consequence, not universal runtime enforcement\./);
+  assert.doesNotMatch(english, /scope-precedence consequence, universal runtime enforcement\./i);
   assert.match(korean, /roles-less guidance-only Claude report.*roles-bearing 전역 report/);
   assert.match(korean, /routed spawn.*전역 guard.*unmanaged.*통과/);
+  assert.match(korean, /이는 scope precedence의 제한된 결과이지 보편적인 runtime enforcement가 아닙니다\./);
+  assert.doesNotMatch(korean, /scope precedence의 보편적인 runtime enforcement 결과/);
 });
 
 test("the READMEs publish complete portable examples and the v0.2 migration boundary", async () => {
