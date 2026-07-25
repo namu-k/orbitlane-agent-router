@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -43,8 +43,16 @@ async function installPresent(context, target = "claude") {
   return result;
 }
 
-async function transitionAbsent(context, target = "claude") {
-  return invoke(["install", "--global", "--target", target, "--contract", context.rolesLessPath], { env: context.env });
+async function transitionAbsent(context, target = "claude", env = context.env) {
+  return invoke(["install", "--global", "--target", target, "--contract", context.rolesLessPath], { env });
+}
+
+async function aliasDirectory(alias, target) {
+  if (process.platform === "win32") {
+    await execFileAsync("cmd.exe", ["/d", "/c", "mklink", "/J", alias, target], { windowsHide: true });
+  } else {
+    await symlink(target, alias, "dir");
+  }
 }
 
 async function filesBefore(context) {
@@ -109,6 +117,16 @@ test("present to absent leaves a valid guidance receipt and inert vendored runti
   assert.ok((await readdir(join(context.claudeHome, ".orbitlane", "hook"))).length > 0);
   assert.equal((await invoke(["uninstall", "--global", "--target", "claude"], { env: context.env })).code, 0);
   await assert.rejects(readdir(join(context.claudeHome, ".orbitlane", "hook")));
+});
+
+test("a global transition accepts an alias path to its installed report", async (t) => {
+  const context = await withBothContracts(t);
+  await installPresent(context);
+  const alias = join(context.directory, "claude-home-alias");
+  await aliasDirectory(alias, context.claudeHome);
+
+  assert.equal((await transitionAbsent(context, "claude", { ...context.env, CLAUDE_CONFIG_DIR: alias })).code, 0);
+  assert.equal(JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8")).hooks, undefined);
 });
 
 test("absent to present restores one hook and remains idempotent", async (t) => {

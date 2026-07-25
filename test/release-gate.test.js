@@ -73,7 +73,7 @@ function packReport(stdout) {
 }
 
 function portableContractFromReadme(text) {
-  const match = /```json\n([\s\S]*?)\n```/.exec(text);
+  const match = /```json\r?\n([\s\S]*?)\r?\n```/.exec(text);
   if (match === null) throw new TypeError("README has no JSON contract example");
   return JSON.parse(match[1]);
 }

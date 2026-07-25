@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from "node:crypto";
-import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -130,7 +130,9 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
     }
     let effective;
     try { effective = await resolveEffectiveContract({ cwd: resolved.root, claudeConfigDir: resolved.root }); } catch (error) { throw transitionFailure(error?.code ?? "REPORT_UNREADABLE", resolved.generatedPath); }
-    if (effective.reportPath !== resolved.generatedPath) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
+    let canonicalGeneratedPath;
+    try { canonicalGeneratedPath = await realpath(resolved.generatedPath); } catch { throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath); }
+    if (effective.reportPath !== canonicalGeneratedPath) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
   }
   if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
   const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;

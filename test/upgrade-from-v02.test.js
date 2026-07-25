@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -54,7 +54,7 @@ async function fileTree(root) {
     for (const entry of await readdir(path, { withFileTypes: true })) {
       const child = join(path, entry.name);
       if (entry.isDirectory()) await visit(child);
-      else entries.push(`${relative(root, child)}:${createHash("sha256").update(await readFile(child)).digest("hex")}`);
+      else entries.push(`${relative(root, child).split(sep).join("/")}:${createHash("sha256").update(await readFile(child)).digest("hex")}`);
     }
   }
   await visit(root);
