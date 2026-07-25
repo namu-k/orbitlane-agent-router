@@ -171,6 +171,40 @@ test("a malformed PreToolUse value is unowned for transition, direct installer, 
   await assertUnchanged(context, before);
 });
 
+for (const [name, mutate] of [
+  ["missing legacy command", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); delete report.receipt; delete report.settings_projection.guard_command; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }],
+  ["mismatched live command", async (context) => { const path = join(context.claudeHome, "settings.json"); const settings = JSON.parse(await readFile(path, "utf8")); settings.hooks.PreToolUse[0].hooks[0].command = "foreign"; await writeFile(path, `${JSON.stringify(settings)}\n`, "utf8"); }],
+]) {
+  test(`guard to guard rejects ${name} before writing or stacking hooks`, async (t) => {
+    const context = await withBothContracts(t);
+    await installPresent(context);
+    await mutate(context);
+    const before = await filesBefore(context);
+    const result = await invoke(["install", "--global", "--target", "claude", "--contract", context.contractPath], { env: context.env });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stdout + result.stderr, /RECEIPT_UNVERIFIABLE/);
+    await assertUnchanged(context, before);
+  });
+}
+
+test("schema-less versioned receipts fail in direct installation and receipt uninstall", async (t) => {
+  const context = await withBothContracts(t);
+  await installPresent(context);
+  const reportPath = join(context.claudeHome, ".orbitlane", "claude-report.json");
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  delete report.schema_version;
+  await writeFile(reportPath, `${JSON.stringify(report)}\n`, "utf8");
+  const before = await filesBefore(context);
+  const action = Object.freeze({ kind: "remove-owned-hook", command: report.receipt.guard_command, reportHash: sha256(await readFile(reportPath, "utf8")) });
+  const direct = await installRouting(ROLES_LESS, { target: "claude", adapters: { claude: await transitionAdapter(context, action) } });
+  assert.equal(direct.outcomes.claude.error.code, "RECEIPT_UNVERIFIABLE");
+  await assertUnchanged(context, before);
+  const uninstall = await invoke(["uninstall", "--global", "--target", "claude"], { env: context.env });
+  assert.notEqual(uninstall.code, 0);
+  assert.match(uninstall.stdout + uninstall.stderr, /RECEIPT_UNVERIFIABLE/);
+  await assertUnchanged(context, before);
+});
+
 test("a Claude transition failure under both preserves a successful Codex install", async (t) => {
   const context = await withBothContracts(t);
   await installPresent(context, "both");

@@ -117,6 +117,7 @@ function previousGuardCommand(content) {
     throw Object.assign(new Error("UNSUPPORTED_REPORT_SCHEMA: the existing report has an unsupported schema"), { code: "UNSUPPORTED_REPORT_SCHEMA" });
   }
   if (report.receipt?.version !== undefined) {
+    if (report.schema_version !== 2) throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: a versioned receipt requires schema version 2"), { code: "RECEIPT_UNVERIFIABLE" });
     if (report.receipt.version !== 1) throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: the existing receipt version is unsupported"), { code: "RECEIPT_UNVERIFIABLE" });
     if (report.receipt.install_shape === "guidance-only") return undefined;
     if (report.receipt.install_shape === "claude-managed-role-guard" && typeof report.receipt.guard_command === "string" && report.receipt.guard_command.length > 0) return report.receipt.guard_command;

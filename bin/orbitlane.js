@@ -132,7 +132,6 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
     try { effective = await resolveEffectiveContract({ cwd: resolved.root, claudeConfigDir: resolved.root }); } catch (error) { throw transitionFailure(error?.code ?? "REPORT_UNREADABLE", resolved.generatedPath); }
     if (effective.reportPath !== resolved.generatedPath) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
   }
-  if (claudeGuardEnabled) return undefined;
   if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
   const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
   if (!legacy && (!report?.contract_snapshot || !digest.test(report.contract_snapshot.sha256 ?? ""))) throw transitionFailure("REPORT_POINTER_MISSING", resolved.generatedPath);
@@ -143,6 +142,7 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
   let settings;
   try { settings = JSON.parse(await readFile(resolved.settingsPath, "utf8")); } catch { throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath); }
   if (!hasAgentHook(settings, command)) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath);
+  if (claudeGuardEnabled) return undefined;
   return Object.freeze({ kind: "remove-owned-hook", command, reportHash: sha256(content) });
 }
 
@@ -164,13 +164,14 @@ async function receiptAdapters(options) {
     // receipt names the shape, or — for an install written before this receipt
     // existed — the pre-0.3.0 guard_command proof applies. A report carrying neither
     // proves nothing and must not touch settings.json.
+    const versionedWithoutSchema = receipt?.version !== undefined && report?.schema_version !== 2;
     const legacy = receipt?.version === undefined;
     const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
     const shape = legacy
       ? (typeof command === "string" && command.length > 0 ? "claude-managed-role-guard" : undefined)
       : receipt?.version === 1 ? receipt.install_shape : undefined;
 
-    if (report !== undefined && shape === "guidance-only") {
+    if (!versionedWithoutSchema && report !== undefined && shape === "guidance-only") {
       // Nothing was ever written to settings.json, so there is nothing to prove or remove.
       const { settingsPath, ...guidanceOnlyPaths } = resolved.claude;
       result.claude = Object.freeze({ ...guidanceOnlyPaths, spawnGuardCommand: false });
@@ -181,7 +182,7 @@ async function receiptAdapters(options) {
       // and deleting the runtime it points at.
       const settings = await readJsonIfPossible(resolved.claude.settingsPath);
       const installed = hasAgentHook(settings, command);
-      result.claude = shape === "claude-managed-role-guard" && typeof command === "string" && command.length > 0 && installed
+      result.claude = !versionedWithoutSchema && shape === "claude-managed-role-guard" && typeof command === "string" && command.length > 0 && installed
         ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
         : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
     }
