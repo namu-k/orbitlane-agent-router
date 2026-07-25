@@ -150,6 +150,31 @@ async function readJsonIfPossible(path) {
   try { return JSON.parse(await readFile(path, "utf8")); } catch { return undefined; }
 }
 
+function guidanceOnlySettingsAreClear(settings, command) {
+  if (settings === null || typeof settings !== "object" || Array.isArray(settings)) return false;
+  if (settings.hooks === undefined) return true;
+  if (settings.hooks === null || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) return false;
+  if (settings.hooks.PreToolUse === undefined) return true;
+  if (!Array.isArray(settings.hooks.PreToolUse)) return false;
+  for (const entry of settings.hooks.PreToolUse) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || typeof entry.matcher !== "string" || !Array.isArray(entry.hooks)) return false;
+    for (const hook of entry.hooks) {
+      if (hook === null || typeof hook !== "object" || Array.isArray(hook)) return false;
+      // Guidance-only receipts never grant deletion authority. Seeing the stale
+      // command anywhere is therefore an ambiguous ownership conflict, including
+      // a non-Agent matcher that the installer could not safely remove from.
+      if (hook.command === command) return false;
+    }
+  }
+  return true;
+}
+
+async function staleGuidanceCommandIsClear(settingsPath, command) {
+  let content;
+  try { content = await readFile(settingsPath, "utf8"); } catch (error) { return error?.code === "ENOENT"; }
+  try { return guidanceOnlySettingsAreClear(JSON.parse(content), command); } catch { return false; }
+}
+
 async function receiptAdapters(options) {
   const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
   const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: selected });
@@ -172,9 +197,18 @@ async function receiptAdapters(options) {
       : receipt?.version === 1 ? receipt.install_shape : undefined;
 
     if (!versionedWithoutSchema && report !== undefined && shape === "guidance-only") {
-      // Nothing was ever written to settings.json, so there is nothing to prove or remove.
-      const { settingsPath, ...guidanceOnlyPaths } = resolved.claude;
-      result.claude = Object.freeze({ ...guidanceOnlyPaths, spawnGuardCommand: false });
+      const staleCommand = report?.settings_projection?.guard_command;
+      const clear = typeof staleCommand !== "string" || staleCommand.length === 0
+        || await staleGuidanceCommandIsClear(resolved.claude.settingsPath, staleCommand);
+      if (clear) {
+        // A proper guidance-only receipt has no settings ownership. Even after a
+        // read-only stale-command probe, keep settingsPath out of the adapter so
+        // the transaction layer cannot rewrite or remove any hook.
+        const { settingsPath, ...guidanceOnlyPaths } = resolved.claude;
+        result.claude = Object.freeze({ ...guidanceOnlyPaths, spawnGuardCommand: false });
+      } else {
+        result.claude = failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
+      }
     } else {
       // Ownership must be proven where removal actually happens. mergeSettings only
       // strips hooks under the Agent matcher, so accepting the command under any
