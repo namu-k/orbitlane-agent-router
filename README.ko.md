@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-> **상태: v0.3.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
+> **상태: v0.3.0은 출시 준비가 되었고 npm 공개를 기다리고 있습니다.** 공개 후 `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
 >
 > **v0.2.0에서 올라올 때 재설치는 권장 사항이며 필수는 아닙니다.** 기존 guard는 계속 올바르게 동작합니다. 새 projection instruction block이 필요할 때 각 scope를 재설치하세요. [CHANGELOG.md](CHANGELOG.md) 참고.
 
@@ -271,7 +271,7 @@ v1에는 telemetry를 넣지 않을 계획입니다.
 
 ## 프로젝트 상태
 
-OrbitLane v0.3.0이 Tier 1 CLI로 npm에 배포되었습니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code의 target-specific 네 줄 guidance, opt-in Claude Code scoped request-consistency guard. Guard는 실제 실행 model을 증명하지 않으며 `effective_model`은 계속 `unproven`입니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
+OrbitLane v0.3.0은 npm 공개를 기다리는 출시 준비 상태입니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code의 target-specific 네 줄 guidance, opt-in Claude Code scoped request-consistency guard를 포함합니다. Guard는 실제 실행 model을 증명하지 않으며 `effective_model`은 계속 `unproven`입니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
 
 ## 검색 및 발견성 메모
 

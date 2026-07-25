@@ -2,7 +2,7 @@
 
 [한국어](README.ko.md)
 
-> **Status: v0.3.0 is published to npm.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
+> **Status: v0.3.0 is prepared for release; npm publication is pending.** After publication, install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
 >
 > **Upgrading from v0.2.0: reinstalling is recommended, not required.** Existing guards keep working correctly; reinstall each scope when you want the new projected instruction block. See [CHANGELOG.md](CHANGELOG.md).
 
@@ -274,7 +274,7 @@ No. The installer is designed to own only a clearly marked routing block and pre
 
 ## Project status
 
-OrbitLane v0.3.0 is published to npm as a Tier 1 CLI: contract compilation, a merge-preserving installer, target-specific four-line guidance for Codex/OMX and Claude Code, and an opt-in Claude Code-scoped request-consistency guard. The guard does not prove the executing model; `effective_model` remains `unproven`. Universal runtime enforcement remains the Tier 2 roadmap.
+OrbitLane v0.3.0 is prepared for release with npm publication pending: contract compilation, a merge-preserving installer, target-specific four-line guidance for Codex/OMX and Claude Code, and an opt-in Claude Code-scoped request-consistency guard. The guard does not prove the executing model; `effective_model` remains `unproven`. Universal runtime enforcement remains the Tier 2 roadmap.
 
 ## Discoverability notes
 

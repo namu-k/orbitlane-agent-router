@@ -33,7 +33,8 @@ that 0.2.0 installed.
   `ORBITLANE` block early and inject text into `CLAUDE.md` / `AGENTS.md`. Model
   strings are now validated as marker-safe single-line tokens before any write.
 - Lane-to-model resolution is shared by the projection and the guard, so the model
-  the kernel advertises and the model the guard enforces cannot diverge. Codex now
+  the kernel advertises and the model the guard expects in the request cannot
+  diverge. Codex now
   requires an official release before trusting a runtime default, matching Claude.
 - A corrupt report no longer reads as "no hook installed" during a reinstall, which
   could orphan a hook entry while reporting success.

@@ -106,10 +106,12 @@ test("public-safety scanner rejects representative private, artifact, and premat
   assert.notDeepEqual(publicSafetyIssues("README.md", ["orbitlane", "agent", "router", "t2"].join("-")), []);
 });
 
-test("README status is consistently post-publish and bounded to Tier 1 plus scoped guard", async () => {
+test("README status is release-ready with npm publication pending and bounded to Tier 1 plus scoped guard", async () => {
   const [english, korean] = await Promise.all([readFile(resolve(root, "README.md"), "utf8"), readFile(resolve(root, "README.ko.md"), "utf8")]);
-  assert.match(english, /published to npm/i);
-  assert.match(korean, /npm에 공개/);
+  assert.match(english, /v0\.3\.0 is prepared for release; npm publication is pending\./i);
+  assert.match(korean, /v0\.3\.0은 출시 준비가 되었고 npm 공개를 기다리고 있습니다\./);
+  assert.doesNotMatch(english, /v0\.3\.0 is published to npm/i);
+  assert.doesNotMatch(korean, /v0\.3\.0이 npm에 공개되었습니다/);
   for (const text of [english, korean]) {
     assert.match(text, /Tier 2 roadmap/i);
     assert.match(text, /scoped/i);
