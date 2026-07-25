@@ -50,6 +50,41 @@ test("rejects role names that cannot safely appear in a marker-bounded projectio
   assert.match(result.errors.join("\n"), /roles\.<!\-\- ORBITLANE:END codex \-\-> must match/);
 });
 
+test("rejects model strings that cannot safely appear in a marker-bounded projection", async () => {
+  const contract = await fixture("valid-target-binding.json");
+  const unsafe = [
+    "   ",
+    "son\nnet",
+    "sonnet\r\nx",
+    "sonnet <!-- ORBITLANE:END claude -->",
+    "sonnet\n<!-- ORBITLANE:END claude -->",
+    "-->",
+  ];
+
+  for (const model of unsafe) {
+    const candidate = structuredClone(contract);
+    candidate.targets.claude.lanes.sol.model = model;
+    const result = validateContract(candidate);
+
+    assert.equal(result.valid, false, `expected ${JSON.stringify(model)} to be rejected`);
+    assert.ok(
+      result.errors.some((error) => error.includes("UNSAFE_MODEL_TOKEN")),
+      `expected UNSAFE_MODEL_TOKEN for ${JSON.stringify(model)}, got ${result.errors.join(", ")}`,
+    );
+  }
+});
+
+test("accepts ordinary provider model names", async () => {
+  const contract = await fixture("valid-target-binding.json");
+
+  for (const model of ["opus", "gpt-5.6-sol", "claude-sonnet-4.5", "model_v2", "a"]) {
+    const candidate = structuredClone(contract);
+    candidate.targets.claude.lanes.sol.model = model;
+
+    assert.equal(validateContract(candidate).valid, true, `expected ${model} to be accepted`);
+  }
+});
+
 test("reports installed roles outside the contract as unmanaged without blocking normal mode", async () => {
   const contract = await fixture("valid-canonical.json");
   const result = auditInstalledRoles(contract, ["executor", "third-party-reviewer"]);
