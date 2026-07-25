@@ -76,7 +76,18 @@ test("an unresolvable lane fails loudly and names the lane", () => {
 
   assert.throws(
     () => projectPolicy({ target: "claude", contract: partial }),
-    (error) => /^AMBIGUOUS_MODEL_RESOLUTION: luna/.test(error.message),
+    (error) => /^AMBIGUOUS_MODEL_RESOLUTION: luna for target claude$/.test(error.message),
+  );
+});
+
+test("the kernel names every unresolved lane together", () => {
+  const partial = structuredClone(contract);
+  delete partial.targets.claude.lanes.sol;
+  delete partial.targets.claude.lanes.luna;
+
+  assert.throws(
+    () => projectPolicy({ target: "claude", contract: partial }),
+    { message: "AMBIGUOUS_MODEL_RESOLUTION: sol, luna for target claude" },
   );
 });
 

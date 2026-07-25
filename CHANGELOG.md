@@ -6,15 +6,22 @@ This project is pre-1.0, so breaking changes raise the minor version.
 
 ### Migration from 0.2.0 — recommended, not required
 
-Reinstall each scope to pick up the new instruction block:
+Package upgrade alone does not rewrite an installed scope. Reinstalling is
+optional for existing installs: the installed guard keeps working correctly, and
+reinstalling only picks up the new instruction block.
+
+Conditional contract migration: when reinstalling a roles-bearing 0.2 contract,
+all three lanes for each selected target must resolve through target bindings or
+official runtime defaults. A legacy contract that bound only its used lane keeps
+working until reinstall, but the 0.3.0 preflight fails before writes and names
+every unresolved kernel lane.
+
+To reinstall a scope:
 
     npm install -g orbitlane@0.3.0
     orbitlane install --global --target both --contract <path>
 
-Unlike 0.2.0, this is not urgent. Guard enforcement semantics are unchanged, so an
-existing install keeps working correctly; only the projected `CLAUDE.md` /
-`AGENTS.md` text is stale until you reinstall. A 0.3.0 CLI can uninstall a guard
-that 0.2.0 installed.
+A 0.3.0 CLI can uninstall a guard that 0.2.0 installed.
 
 ### Changed
 

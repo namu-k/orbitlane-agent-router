@@ -4,7 +4,7 @@
 
 > **상태: v0.3.0은 출시 준비가 되었고 npm 공개를 기다리고 있습니다.** 공개 후 `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
 >
-> **v0.2.0에서 올라올 때 재설치는 권장 사항이며 필수는 아닙니다.** 기존 guard는 계속 올바르게 동작합니다. 새 projection instruction block이 필요할 때 각 scope를 재설치하세요. [CHANGELOG.md](CHANGELOG.md) 참고.
+> **v0.2.0에서 올라올 때 재설치는 권장 사항이며 필수는 아닙니다.** package upgrade만으로는 설치된 scope를 다시 쓰지 않고 기존 guard는 계속 올바르게 동작합니다. 새 projection instruction block이 필요할 때 각 scope를 재설치하세요. roles를 선언한 0.2 contract가 실제로 사용한 lane만 담고 있다면 재설치 전에 세 lane 모두에 binding을 추가하거나 공식 runtime default를 사용할 수 있어야 합니다. [CHANGELOG.md](CHANGELOG.md) 참고.
 
 OrbitLane은 하나의 라우팅 contract를 Codex/OMX와 Claude Code의 네이티브 guidance로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 contract 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 roles를 선언한 contract에만 적용되는 Claude Code scoped spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 
@@ -20,7 +20,7 @@ OrbitLane은 라우팅 정책을 명시적이고 이식 가능하게 만듭니�
 - 이름 있는 역할과 작업 형태를 lane에 연결합니다.
 - Codex, Claude Code 또는 둘 다 필요한 adapter만 설치합니다.
 - marker 기반 병합으로 사용자가 작성한 내용을 보존합니다.
-- roles를 선언한 경우에만 분류되지 않은 역할을 임의 모델에 배정하지 않고 거부합니다.
+- 선언된 roles는 검사하며 contract에 선언되지 않은 runtime role은 unmanaged로 통과합니다.
 - configuration 적용과 runtime enforcement를 분리해 감사합니다.
 - 지원되지 않는 capability는 성공으로 가장하지 않고 `false` 또는 `unproven`으로 보고합니다.
 
@@ -119,11 +119,27 @@ OrbitLane은 workflow 문장에 특정 vendor의 현재 model 이름을 고정�
     "architect": { "lane": "sol",   "provenance": "user-approved" },
     "executor":  { "lane": "terra", "provenance": "user-approved" },
     "explore":   { "lane": "luna",  "provenance": "user-approved" }
+  },
+  "targets": {
+    "codex": {
+      "lanes": {
+        "sol":   { "model": "gpt-5.6-sol",   "provenance": "user-approved" },
+        "terra": { "model": "gpt-5.6-terra", "provenance": "user-approved" },
+        "luna":  { "model": "gpt-5.6-luna",  "provenance": "user-approved" }
+      }
+    },
+    "claude": {
+      "lanes": {
+        "sol":   { "model": "opus",   "provenance": "user-approved" },
+        "terra": { "model": "sonnet", "provenance": "user-approved" },
+        "luna":  { "model": "haiku",  "provenance": "user-approved" }
+      }
+    }
   }
 }
 ```
 
-Lane은 canonical id(`sol` / `terra` / `luna`)와 `class`(judgment / implementation / bounded-retrieval) 두 층으로 표현합니다. Adapter는 각 lane을 contract의 선택적 per-target binding, 없으면 runtime의 공식 default(lane class 기준)로 해석하고 그 근거를 기록하며, 모호하면 추측하지 않고 실패합니다. `roles`는 선택 사항입니다. 있을 때에는 각 routed role에 provenance가 필요하며, `roles`를 생략하면 의도적으로 guidance-only 설치를 선택합니다.
+Lane은 canonical id(`sol` / `terra` / `luna`)와 `class`(judgment / implementation / bounded-retrieval) 두 층으로 표현합니다. 네 줄 kernel을 설치하려면 선택한 target의 세 lane(`sol`, `terra`, `luna`) 모두가 해당 target의 binding 또는 runtime의 공식 default로 해석되어야 하며, 모호하면 추측하지 않고 실패합니다. `roles`는 선택 사항입니다. 있을 때에는 각 routed role에 provenance가 필요하며, `roles`를 생략하면 의도적으로 guidance-only 설치를 선택합니다.
 
 `sonnet`, `haiku`, `opus`에 binding된 Claude target의 설치 kernel은 정확히 다음 네 개의 영어 줄입니다.
 

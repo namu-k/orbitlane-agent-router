@@ -10,6 +10,8 @@ import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
 import { evaluateClaudeAgentSpawn } from "../src/guards/claude-spawn.js";
+import { projectPolicy } from "../src/policy/index.js";
+import { validateContract } from "../src/schema/index.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -68,6 +70,12 @@ function packReport(stdout) {
     throw new TypeError(`unrecognised npm pack --json shape: ${stdout.slice(0, 200)}`);
   }
   return archive;
+}
+
+function portableContractFromReadme(text) {
+  const match = /```json\n([\s\S]*?)\n```/.exec(text);
+  if (match === null) throw new TypeError("README has no JSON contract example");
+  return JSON.parse(match[1]);
 }
 
 test("release package is allowlisted, private-free, and ships its CLI", async () => {
@@ -142,6 +150,34 @@ test("the READMEs separate guidance from enforcement", async () => {
   assert.match(english, /subagent-shaped entries are requested-route evidence, not installed Claude custom subagent definition files/i);
   assert.match(korean, /Codex native agent\/model configuration이나 Claude custom subagent definition file을 설치하지는 않습니다/);
   assert.match(korean, /요청 route evidence이며 설치된 Claude custom subagent definition file이 아닙니다/);
+});
+
+test("the READMEs publish complete portable examples and the v0.2 migration boundary", async () => {
+  const [english, korean, changelog] = await Promise.all([
+    readFile(resolve(root, "README.md"), "utf8"),
+    readFile(resolve(root, "README.ko.md"), "utf8"),
+    readFile(resolve(root, "CHANGELOG.md"), "utf8"),
+  ]);
+
+  for (const text of [english, korean]) {
+    assert.match(text, /"targets":\s*\{/);
+    assert.match(text, /"codex":\s*\{/);
+    assert.match(text, /"claude":\s*\{/);
+    assert.match(text, /"sol":\s*\{\s*"model"/);
+    assert.match(text, /"terra":\s*\{\s*"model"/);
+    assert.match(text, /"luna":\s*\{\s*"model"/);
+    const contractExample = portableContractFromReadme(text);
+    assert.deepEqual(validateContract(contractExample), { valid: true, errors: [] });
+    for (const target of ["codex", "claude"]) {
+      assert.match(projectPolicy({ target, contract: contractExample }), /When delegating, use:/);
+    }
+  }
+  assert.match(english, /Declared roles are checked; runtime roles not declared in the contract pass through as unmanaged\./);
+  assert.match(korean, /선언된 roles는 검사하며 contract에 선언되지 않은 runtime role은 unmanaged로 통과합니다\./);
+  assert.match(english, /all three lanes \(`sol`, `terra`, and `luna`\).*selected target.*bindings or the runtime's official defaults/i);
+  assert.match(korean, /선택한 target.*세 lane\(`sol`, `terra`, `luna`\).*binding 또는 runtime의 공식 default/i);
+  assert.match(changelog, /Package upgrade alone does not rewrite an installed scope\./);
+  assert.match(changelog, /Conditional contract migration/);
 });
 
 test("spawn guard decision p95 remains below the 50ms local budget", () => {

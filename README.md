@@ -4,7 +4,7 @@
 
 > **Status: v0.3.0 is prepared for release; npm publication is pending.** After publication, install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
 >
-> **Upgrading from v0.2.0: reinstalling is recommended, not required.** Existing guards keep working correctly; reinstall each scope when you want the new projected instruction block. See [CHANGELOG.md](CHANGELOG.md).
+> **Upgrading from v0.2.0: reinstalling is recommended, not required.** A package upgrade alone does not rewrite an installed scope, and existing guards keep working correctly. Reinstall each scope when you want the new projected instruction block. If a roles-bearing 0.2 contract has only the lane it used, add bindings (or use official runtime defaults) for all three lanes before reinstalling. See [CHANGELOG.md](CHANGELOG.md).
 
 OrbitLane is an open-source **routing contract compiler** that compiles one routing contract into runtime-native guidance for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and an opt-in Claude Code-scoped spawn guard for contracts that declare roles. A general-purpose runtime model router is the Tier 2 roadmap.
 
@@ -20,7 +20,7 @@ OrbitLane makes the routing policy explicit and portable:
 - Map named roles and task shapes to those lanes.
 - Install only the adapter you need: Codex, Claude Code, or both.
 - Preserve user-owned content through marker-bounded merges.
-- When roles are declared, reject unclassified roles instead of silently assigning a model.
+- Declared roles are checked; runtime roles not declared in the contract pass through as unmanaged.
 - Audit configuration separately from runtime enforcement.
 - Report unsupported capabilities as `false` or `unproven`, never as implied success.
 
@@ -121,11 +121,27 @@ OrbitLane uses semantic lanes rather than hard-coding a vendor's current model n
     "architect": { "lane": "sol",   "provenance": "user-approved" },
     "executor":  { "lane": "terra", "provenance": "user-approved" },
     "explore":   { "lane": "luna",  "provenance": "user-approved" }
+  },
+  "targets": {
+    "codex": {
+      "lanes": {
+        "sol":   { "model": "gpt-5.6-sol",   "provenance": "user-approved" },
+        "terra": { "model": "gpt-5.6-terra", "provenance": "user-approved" },
+        "luna":  { "model": "gpt-5.6-luna",  "provenance": "user-approved" }
+      }
+    },
+    "claude": {
+      "lanes": {
+        "sol":   { "model": "opus",   "provenance": "user-approved" },
+        "terra": { "model": "sonnet", "provenance": "user-approved" },
+        "luna":  { "model": "haiku",  "provenance": "user-approved" }
+      }
+    }
   }
 }
 ```
 
-Lanes carry a canonical id (`sol` / `terra` / `luna`) and a `class` (judgment / implementation / bounded-retrieval). Adapters resolve each lane to a supported model using the contract's optional per-target binding, else the runtime's official default for that lane class, recording the source; ambiguous resolution fails rather than guessing. `roles` is optional. If present, each routed role needs provenance; an omitted `roles` object deliberately selects guidance-only installation.
+Lanes carry a canonical id (`sol` / `terra` / `luna`) and a `class` (judgment / implementation / bounded-retrieval). To install the four-line kernel, all three lanes (`sol`, `terra`, and `luna`) for the selected target must resolve through that target's bindings or the runtime's official defaults; ambiguous resolution fails rather than guessing. `roles` is optional. If present, each routed role needs provenance; an omitted `roles` object deliberately selects guidance-only installation.
 
 For a Claude target bound to `sonnet`, `haiku`, and `opus`, the installed kernel
 is exactly these four English lines:

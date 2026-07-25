@@ -26,11 +26,12 @@ export function projectPolicy({ target, contract, runtimeDefaults }) {
   const lanes = resolveLaneModels(contract, target, runtimeDefaults);
   // The kernel embeds all three model names, so an unresolved lane has no honest
   // rendering. Fail rather than emit a placeholder or drop the line.
-  for (const laneId of KERNEL_LANES) {
-    if (lanes[laneId]?.reason === "UNSAFE_MODEL_TOKEN") throw new TypeError(`UNSAFE_MODEL_TOKEN: runtime default for ${laneId} cannot appear in a marker-bounded projection`);
-    if (lanes[laneId]?.resolved !== true) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${laneId} for target ${target}`);
-    if (!isMarkerSafeModelToken(lanes[laneId].model)) throw new TypeError(`UNSAFE_MODEL_TOKEN: ${laneId} cannot appear in a marker-bounded projection`);
-  }
+  const unsafeDefault = KERNEL_LANES.find((laneId) => lanes[laneId]?.reason === "UNSAFE_MODEL_TOKEN");
+  if (unsafeDefault !== undefined) throw new TypeError(`UNSAFE_MODEL_TOKEN: runtime default for ${unsafeDefault} cannot appear in a marker-bounded projection`);
+  const unresolved = KERNEL_LANES.filter((laneId) => lanes[laneId]?.resolved !== true);
+  if (unresolved.length > 0) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${unresolved.join(", ")} for target ${target}`);
+  const unsafeResolved = KERNEL_LANES.find((laneId) => !isMarkerSafeModelToken(lanes[laneId].model));
+  if (unsafeResolved !== undefined) throw new TypeError(`UNSAFE_MODEL_TOKEN: ${unsafeResolved} cannot appear in a marker-bounded projection`);
 
   const body = KERNEL
     .map((line) => KERNEL_LANES.reduce((text, laneId) => text.replaceAll(`{${laneId}}`, lanes[laneId].model), line))
