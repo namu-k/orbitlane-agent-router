@@ -305,7 +305,7 @@ async function main() {
   const options = parse(process.argv.slice(2));
   if (options.command === "help") return null;
   if (options.command === "recover") return recoverRouting({ manifest: { path: resolve(options.manifest) } });
-  if (options.command === "uninstall" && options.contract === undefined) {
+  if (options.command === "uninstall") {
     return uninstall(options, await receiptAdapters(options));
   }
   const contractSource = await loadJsonSource(options.contract);
