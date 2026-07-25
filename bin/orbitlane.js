@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,6 +93,46 @@ function failedAdapter(error, paths) {
   return Object.freeze({ ...paths, render: () => { throw error; } });
 }
 
+const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
+const digest = /^[a-f0-9]{64}$/;
+
+function transitionFailure(code, path) {
+  return Object.assign(new Error(`${code}: ${path}`), { code });
+}
+
+function hasAgentHook(settings, command) {
+  return (settings?.hooks?.PreToolUse ?? [])
+    .filter((entry) => entry?.matcher === "Agent")
+    .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+    .some((hook) => hook?.type === "command" && hook.command === command);
+}
+
+async function claudeTransitionAction(options, claudeGuardEnabled) {
+  if (options.command !== "install" || options.dryRun === true || claudeGuardEnabled || (options.target !== "claude" && options.target !== "both")) return undefined;
+  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude;
+  let content;
+  try { content = await readFile(resolved.generatedPath, "utf8"); } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath);
+  }
+  let report;
+  try { report = JSON.parse(content); } catch { throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath); }
+  if (report === null || typeof report !== "object" || Array.isArray(report)) throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath);
+  const receipt = report.receipt;
+  if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
+  const legacy = receipt?.version === undefined;
+  const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+  if (!legacy && (!report?.contract_snapshot || !digest.test(report.contract_snapshot.sha256 ?? ""))) throw transitionFailure("REPORT_POINTER_MISSING", resolved.generatedPath);
+  if ((legacy && (typeof command !== "string" || command.length === 0))
+    || (!legacy && (receipt?.version !== 1 || receipt.install_shape !== "claude-managed-role-guard" || typeof command !== "string" || command.length === 0))) {
+    throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
+  }
+  let settings;
+  try { settings = JSON.parse(await readFile(resolved.settingsPath, "utf8")); } catch { throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath); }
+  if (!hasAgentHook(settings, command)) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath);
+  return Object.freeze({ kind: "remove-owned-hook", command, reportHash: sha256(content) });
+}
+
 async function readJsonIfPossible(path) {
   try { return JSON.parse(await readFile(path, "utf8")); } catch { return undefined; }
 }
@@ -144,7 +184,7 @@ function adapters(contract, options) {
   const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: selected });
   const codexPaths = resolved.codex;
   const { settingsPath, ...claudeGuidanceOnlyPaths } = resolved.claude;
-  const claudePaths = options.claudeGuardEnabled === false ? claudeGuidanceOnlyPaths : resolved.claude;
+  const claudePaths = options.claudeTransitionAction !== undefined || options.claudeGuardEnabled !== false ? resolved.claude : claudeGuidanceOnlyPaths;
   const runtimeDefaults = options.runtimeDefaults === undefined ? undefined : options.runtimeDefaults;
   const generated = join(resolved.claude.root, ".orbitlane");
   const result = {};
@@ -157,7 +197,7 @@ function adapters(contract, options) {
       // failures belong to the Claude target, not to the whole run: --target both
       // must still install Codex.
       if (options.claudePreparationError !== undefined) throw options.claudePreparationError;
-      result.claude = createClaudeTier1Adapter(contract, {
+      result.claude = Object.freeze({ ...createClaudeTier1Adapter(contract, {
         ...claudePaths,
         ...(options.claudeGuardEnabled === false ? {} : {
           spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
@@ -165,7 +205,7 @@ function adapters(contract, options) {
         runtimeDefaults,
         contractSha256: options.contractSha256,
         runtimeDefaultsSha256: options.runtimeDefaultsSha256,
-      });
+      }), ...(options.claudeTransitionAction === undefined ? {} : { transitionAction: options.claudeTransitionAction }) });
     } catch (error) { result.claude = failedAdapter(error, claudePaths); }
   }
   return Object.freeze(result);
@@ -228,11 +268,12 @@ async function main() {
   // installs Codex, matching how adapter construction already isolates targets.
   let prepared = {};
   try {
+    const transitionAction = await claudeTransitionAction(options, claudeGuardEnabled);
     const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
     if (persist && claudeGuardEnabled) await vendorHookRuntime(claudeRoot);
     const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
     const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
-    prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 };
+    prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256, ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
   } catch (error) {
     if (options.target === "codex") prepared = {};
     else if (options.target === "claude") throw error;

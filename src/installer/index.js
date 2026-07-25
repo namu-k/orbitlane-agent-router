@@ -105,7 +105,27 @@ function runtimeFailure(adapter) {
 }
 
 function previousGuardCommand(content) {
-  try { return JSON.parse(content).settings_projection?.guard_command; } catch { return undefined; }
+  if (content.length === 0) return undefined;
+  let report;
+  try { report = JSON.parse(content); } catch {
+    throw Object.assign(new Error("REPORT_UNREADABLE: the existing report could not be parsed"), { code: "REPORT_UNREADABLE" });
+  }
+  if (report?.receipt?.version === 1) {
+    return report.receipt.install_shape === "claude-managed-role-guard" ? report.receipt.guard_command : undefined;
+  }
+  if (report?.receipt?.version !== undefined) return undefined;
+  return report?.settings_projection?.guard_command;
+}
+
+function hasAgentHook(content, command) {
+  let settings;
+  try { settings = content.length === 0 ? {} : JSON.parse(content); } catch {
+    throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: settings could not be parsed"), { code: "RECEIPT_UNVERIFIABLE" });
+  }
+  return (settings?.hooks?.PreToolUse ?? [])
+    .filter((entry) => entry?.matcher === "Agent")
+    .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+    .some((hook) => hook?.type === "command" && hook.command === command);
 }
 
 function mergeSettings(content, command, previousCommand, remove = false) {
@@ -137,10 +157,23 @@ function installDiff(target, instruction, generated, settings, rendered) {
   return Object.freeze({
     instruction: Object.freeze({ path: instruction.path, before: instruction.content, after: instructionAfter }),
     generated: Object.freeze({ path: generated.path, before: generated.content, after: rendered.generated }),
-    settings: settings === null || rendered.settingsProjection === undefined
-      ? null
-      : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, rendered.settingsProjection.command, previousGuardCommand(generated.content)) }),
+    settings: adapterTransitionSettings(settings, generated, rendered),
   });
+}
+
+function adapterTransitionSettings(settings, generated, rendered) {
+  const action = rendered.transitionAction;
+  if (action !== undefined) {
+    const previousCommand = previousGuardCommand(generated.content);
+    if (settings === null || action?.kind !== "remove-owned-hook" || typeof action.command !== "string"
+      || action.reportHash !== sha256(generated.content) || previousCommand !== action.command || !hasAgentHook(settings.content, action.command)) {
+      throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: transition ownership could not be verified"), { code: "RECEIPT_UNVERIFIABLE" });
+    }
+    return Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, action.command, previousCommand, true) });
+  }
+  return settings === null || rendered.settingsProjection === undefined
+    ? null
+    : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, rendered.settingsProjection.command, previousGuardCommand(generated.content)) });
 }
 
 function uninstallDiff(target, instruction, generated, settings, adapter) {
@@ -235,7 +268,10 @@ async function runTarget(target, adapter, hooks, operation) {
 async function installOne(contract, target, adapter, hooks) {
   return runTarget(target, adapter, hooks, {
     status: "installed",
-    plan: (instruction, generated, settings) => installDiff(target, instruction, generated, settings, adapter.render(contract)),
+    plan: (instruction, generated, settings) => {
+      const rendered = adapter.render(contract);
+      return installDiff(target, instruction, generated, settings, { ...rendered, transitionAction: adapter.transitionAction });
+    },
     isUnchanged: (diff, generated, settings) => diff.instruction.before === diff.instruction.after && generated.exists && diff.generated.before === diff.generated.after && (settings === null || diff.settings.before === diff.settings.after),
     stage: async (transactionPath, diff, instruction, generated, settings) => {
       await writeStaged(join(transactionPath, "instruction.stage"), diff.instruction.after, instruction.mode);
@@ -293,7 +329,7 @@ async function previewOne(contract, target, adapter) {
     ]);
     return Object.freeze({
       status: "planned",
-      diff: installDiff(target, instruction, generated, settings, adapter.render(contract)),
+      diff: installDiff(target, instruction, generated, settings, { ...adapter.render(contract), transitionAction: adapter.transitionAction }),
       manifest: null,
     });
   } catch (error) {
