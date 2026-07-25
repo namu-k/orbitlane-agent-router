@@ -194,7 +194,10 @@ test("a roles-less install claims no native configuration and no enforcement", (
   const report = JSON.parse(adapter.render(rolesLess).generated);
 
   assert.equal(report.enforcement_scope, "none (roles omitted)");
-  assert.equal(report.capabilities.native_role_configuration, "not-applicable");
+  assert.deepEqual(report.capabilities.native_role_configuration, {
+    status: "not-applicable",
+    scope: "roles-omitted",
+  });
   assert.deepEqual(report.requested_routes, {});
   assert.deepEqual(report.subagents, {});
   assert.deepEqual(report.native_artifacts, {});

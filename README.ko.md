@@ -67,6 +67,8 @@ OrbitLane은 두 레이어로 설치한다. 두 런타임 모두 전역과 프�
 최근접 프로젝트 report가 이기고, 프로젝트 report가 없을 때만 전역 report를 쓴다.
 따라서 프로젝트가 전역 baseline을 override하면서도 두 guard의 판정이 갈리지 않는다.
 
+프로젝트에 roles-less guidance-only Claude report를 설치하면 가장 가까운 프로젝트 report가 roles-bearing 전역 report를 가립니다. 그러면 routed spawn은 전역 guard의 검사를 받지 않고 unmanaged로 처리되어 통과합니다. 이는 scope precedence의 제한된 결과이지 보편적인 runtime enforcement가 아닙니다.
+
 ### install이 기록하는 것
 
 모든 target은 네 줄의 instruction block을 **guidance**로 받습니다. 이 block은 해당

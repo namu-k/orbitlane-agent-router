@@ -75,7 +75,10 @@ export function createClaudeTier1Adapter(contract, options) {
   const probedCapabilities = probeClaudeTier1Capabilities();
   const capabilities = hasRoles
     ? probedCapabilities
-    : Object.freeze({ ...probedCapabilities, native_role_configuration: "not-applicable" });
+    : Object.freeze({
+      ...probedCapabilities,
+      native_role_configuration: Object.freeze({ status: "not-applicable", scope: "roles-omitted" }),
+    });
   const settingsProjection = options.spawnGuardCommand === undefined
     ? Object.freeze({ hooks: Object.freeze({}) })
     : Object.freeze({ hooks: Object.freeze({ PreToolUse: Object.freeze([{ matcher: "Agent", hooks: Object.freeze([{ type: "command", command: options.spawnGuardCommand }]) }]) }) });

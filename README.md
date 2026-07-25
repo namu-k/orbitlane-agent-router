@@ -68,6 +68,8 @@ the nearest project report wins, and the global report is used only when no
 project report exists. A project therefore overrides the global baseline
 without the two guards disagreeing.
 
+A roles-less guidance-only Claude report installed in a project shadows a roles-bearing global report. Routed spawns are therefore treated as unmanaged and pass through rather than being checked by the global guard. This is a bounded scope-precedence consequence, not universal runtime enforcement.
+
 ### What install writes
 
 Every target receives a four-line instruction block as **guidance**. It carries

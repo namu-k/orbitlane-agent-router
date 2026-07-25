@@ -152,6 +152,17 @@ test("the READMEs separate guidance from enforcement", async () => {
   assert.match(korean, /요청 route evidence이며 설치된 Claude custom subagent definition file이 아닙니다/);
 });
 
+test("the READMEs document the bounded roles-less Claude precedence consequence", async () => {
+  const [english, korean] = await Promise.all([
+    readFile(resolve(root, "README.md"), "utf8"),
+    readFile(resolve(root, "README.ko.md"), "utf8"),
+  ]);
+
+  assert.match(english, /roles-less guidance-only Claude report.*shadows a roles-bearing global report.*routed spawns.*unmanaged and pass through.*global guard/i);
+  assert.match(korean, /roles-less guidance-only Claude report.*roles-bearing 전역 report/);
+  assert.match(korean, /routed spawn.*전역 guard.*unmanaged.*통과/);
+});
+
 test("the READMEs publish complete portable examples and the v0.2 migration boundary", async () => {
   const [english, korean, changelog] = await Promise.all([
     readFile(resolve(root, "README.md"), "utf8"),
