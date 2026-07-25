@@ -143,7 +143,8 @@ function adapters(contract, options) {
   const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
   const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: selected });
   const codexPaths = resolved.codex;
-  const claudePaths = resolved.claude;
+  const { settingsPath, ...claudeGuidanceOnlyPaths } = resolved.claude;
+  const claudePaths = options.claudeGuardEnabled === false ? claudeGuidanceOnlyPaths : resolved.claude;
   const runtimeDefaults = options.runtimeDefaults === undefined ? undefined : options.runtimeDefaults;
   const generated = join(resolved.claude.root, ".orbitlane");
   const result = {};
@@ -158,7 +159,9 @@ function adapters(contract, options) {
       if (options.claudePreparationError !== undefined) throw options.claudePreparationError;
       result.claude = createClaudeTier1Adapter(contract, {
         ...claudePaths,
-        spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+        ...(options.claudeGuardEnabled === false ? {} : {
+          spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+        }),
         runtimeDefaults,
         contractSha256: options.contractSha256,
         runtimeDefaultsSha256: options.runtimeDefaultsSha256,
@@ -211,6 +214,10 @@ async function main() {
   const contractSource = await loadJsonSource(options.contract);
   const runtimeDefaultsSource = options.runtimeDefaults === undefined ? undefined : await loadJsonSource(options.runtimeDefaults);
   const contract = contractSource.value;
+  // Roles are what the guard enforces. Without them the install is guidance only:
+  // no hook entry, no vendored runtime. The snapshot is still written, because the
+  // report's contract pointer is what any other installed guard resolves through.
+  const claudeGuardEnabled = Object.keys(contract.roles ?? {}).length > 0;
   const runtimeDefaults = runtimeDefaultsSource?.value;
   const claudeSelected = options.target === "claude" || options.target === "both";
   const persist = options.command === "install" && options.dryRun !== true && claudeSelected;
@@ -222,7 +229,7 @@ async function main() {
   let prepared = {};
   try {
     const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
-    if (persist) await vendorHookRuntime(claudeRoot);
+    if (persist && claudeGuardEnabled) await vendorHookRuntime(claudeRoot);
     const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
     const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
     prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 };
@@ -232,7 +239,7 @@ async function main() {
     else prepared = { claudePreparationError: error };
   }
 
-  const targetAdapters = adapters(contract, { ...options, runtimeDefaults, ...prepared });
+  const targetAdapters = adapters(contract, { ...options, runtimeDefaults, claudeGuardEnabled, ...prepared });
   if (options.command === "uninstall") return uninstall(options, targetAdapters);
   return options.dryRun ? previewRouting(contract, { target: options.target, adapters: targetAdapters }) : installRouting(contract, { target: options.target, adapters: targetAdapters });
 }

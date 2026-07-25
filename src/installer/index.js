@@ -137,7 +137,9 @@ function installDiff(target, instruction, generated, settings, rendered) {
   return Object.freeze({
     instruction: Object.freeze({ path: instruction.path, before: instruction.content, after: instructionAfter }),
     generated: Object.freeze({ path: generated.path, before: generated.content, after: rendered.generated }),
-    settings: settings === null ? null : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, rendered.settingsProjection.command, previousGuardCommand(generated.content)) }),
+    settings: settings === null || rendered.settingsProjection === undefined
+      ? null
+      : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, rendered.settingsProjection.command, previousGuardCommand(generated.content)) }),
   });
 }
 
