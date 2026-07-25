@@ -93,34 +93,34 @@ test("a routed role whose own lane is unbound still fails", () => {
   assert.throws(() => resolveClaudeRequestedRoutes(partial), /AMBIGUOUS_MODEL_RESOLUTION: architect/);
 });
 
-test("reports native projection capability only when supported runtime and native artifacts are present", () => {
+test("never infers native configuration from runtime flags or caller-supplied artifact bytes", () => {
   assert.deepEqual(probeClaudeTier1Capabilities({
     runtime: { available: true, version: "1.0.0" },
     supportsVersion: () => true,
     nativeArtifacts: [{ path: "executor.md", content: "---\nname: \"executor\"\ndescription: \"Executor\"\nmodel: \"claude-terra\"\neffort: \"medium\"\n---\n" }],
-  }).native_role_configuration, { status: "configured", scope: "custom-subagent-definitions" });
+  }).native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
   assert.deepEqual(probeClaudeTier1Capabilities({
     runtime: { available: false, version: "1.0.0" },
     supportsVersion: () => true,
     nativeArtifacts: [],
-  }).native_role_configuration, { status: "unproven", scope: "runtime-or-artifact-unavailable" });
+  }).native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
   const executorArtifact = { path: "executor.md", content: "---\nname: \"executor\"\ndescription: \"Executor\"\nmodel: \"claude-terra\"\neffort: \"medium\"\n---\n" };
   assert.deepEqual(probeClaudeTier1Capabilities({
     runtime: { available: true, version: "1.0.0" },
     supportsVersion: () => true,
     nativeArtifacts: [executorArtifact, executorArtifact],
     expectedRoutes: { executor: { model: "claude-terra", reasoning: "medium" }, explore: { model: "claude-luna", reasoning: "low" } },
-  }).native_role_configuration, { status: "unproven", scope: "runtime-or-artifact-unavailable" });
+  }).native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
   assert.deepEqual(probeClaudeTier1Capabilities({
     runtime: { available: true, version: "1.0.0" },
     supportsVersion: () => true,
     nativeArtifacts: [{ path: "executor.md", content: "---\nname: null\ndescription: \"Executor\"\nmodel: \"claude-terra\"\neffort: \"medium\"\n---\n" }],
-  }).native_role_configuration, { status: "unproven", scope: "runtime-or-artifact-unavailable" });
+  }).native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
   assert.deepEqual(probeClaudeTier1Capabilities({
     runtime: { available: true, version: "1.0.0" },
     supportsVersion: () => true,
     nativeArtifacts: [{}],
-  }).native_role_configuration, { status: "unproven", scope: "runtime-or-artifact-unavailable" });
+  }).native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
 });
 
 test("projects stable Claude subagents and an honest Tier 1 report without transcript injection", () => {
@@ -163,6 +163,7 @@ test("projects stable Claude subagents and an honest Tier 1 report without trans
     effective: "unproven",
   });
   assert.deepEqual(generated.capabilities.claude_agent_pre_dispatch, { status: "unproven", scope: "Agent tool only" });
+  assert.deepEqual(generated.capabilities.native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
 });
 
 test("a roles-less install claims no native configuration and no enforcement", () => {

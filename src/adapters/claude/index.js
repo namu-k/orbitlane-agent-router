@@ -15,49 +15,21 @@ function assertValidContract(contract) {
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
 }
 
-function parseNativeArtifact(artifact) {
-  if (typeof artifact?.path !== "string" || !artifact.path.endsWith(".md") || typeof artifact.content !== "string") return null;
-  const match = artifact.content.match(/^---\nname: (.+)\ndescription: (.+)\nmodel: (.+)\neffort: (.+)\n---\n/m);
-  if (match === null) return null;
-  try {
-    const parsed = Object.freeze({ path: artifact.path, name: JSON.parse(match[1]), description: JSON.parse(match[2]), model: JSON.parse(match[3]), effort: JSON.parse(match[4]) });
-    return [parsed.name, parsed.description, parsed.model, parsed.effort].every((value) => typeof value === "string" && value.length > 0) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function artifactsMatchRoutes(nativeArtifacts, expectedRoutes) {
-  const parsed = nativeArtifacts.map(parseNativeArtifact);
-  if (parsed.some((artifact) => artifact === null)) return false;
-  const expected = Object.entries(expectedRoutes ?? {});
-  if (expected.length > 0 && parsed.length !== expected.length) return false;
-  const names = new Set(parsed.map((artifact) => artifact.name));
-  if (names.size !== parsed.length) return false;
-  if (expected.length > 0 && (names.size !== expected.length || expected.some(([role]) => !names.has(role)))) return false;
-  return parsed.every((artifact) => artifact.path === `${artifact.name}.md`
-    && (expectedRoutes?.[artifact.name] === undefined || (artifact.model === expectedRoutes[artifact.name].model && artifact.effort === expectedRoutes[artifact.name].reasoning)));
-}
-
-export function probeClaudeTier1Capabilities({ runtime, supportsVersion, nativeArtifacts = [], expectedRoutes = {} }) {
-  const nativeAvailable = runtime?.available === true && typeof supportsVersion === "function"
-    && supportsVersion(runtime.version) && artifactsMatchRoutes(nativeArtifacts, expectedRoutes);
+export function probeClaudeTier1Capabilities() {
+  // 0.3 generates requested-route evidence but neither installs Claude custom
+  // subagent definitions nor discovers runtime files. Caller-supplied flags and
+  // bytes cannot prove a native configuration exists.
   return {
     native_role_configuration: {
-      status: nativeAvailable ? "configured" : "unproven",
-      scope: nativeAvailable ? "custom-subagent-definitions" : "runtime-or-artifact-unavailable",
+      status: "unproven",
+      scope: "no-native-artifact-discovery",
     },
     ...structuredClone(CLAUDE_TIER1_CAPABILITIES),
   };
 }
 
 export function claudeTier1CapabilityMatrix() {
-  return probeClaudeTier1Capabilities({
-    runtime: { available: true, version: "fixture" },
-    supportsVersion: () => true,
-    nativeArtifacts: [{ path: "fixture.md", content: "---\nname: \"fixture\"\ndescription: \"Fixture\"\nmodel: \"fixture\"\neffort: \"medium\"\n---\n" }],
-    expectedRoutes: { fixture: { model: "fixture", reasoning: "medium" } },
-  });
+  return probeClaudeTier1Capabilities();
 }
 
 export function resolveClaudeRequestedRoutes(contract, runtimeDefaults) {
@@ -100,12 +72,7 @@ export function createClaudeTier1Adapter(contract, options) {
   const nativeArtifacts = Object.fromEntries(Object.entries(subagents).map(([role, subagent]) => [
     `${role}.md`, nativeSubagentDefinition(role, routes[role], subagent.instructions),
   ]));
-  const probedCapabilities = probeClaudeTier1Capabilities({
-    runtime: options.runtime,
-    supportsVersion: options.supportsVersion,
-    nativeArtifacts: Object.entries(nativeArtifacts).map(([path, content]) => ({ path, content })),
-    expectedRoutes: routes,
-  });
+  const probedCapabilities = probeClaudeTier1Capabilities();
   const capabilities = hasRoles
     ? probedCapabilities
     : Object.freeze({ ...probedCapabilities, native_role_configuration: "not-applicable" });

@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "type": "module",
   "license": "MIT",
-  "description": "Routing contract compiler for coding-agent runtimes: compile one role-to-model routing contract into native configuration for Codex/OMX and Claude Code, then audit what can actually be enforced.",
+  "description": "Routing contract compiler for coding-agent runtimes: compile one role-to-model contract into target-specific guidance and audit what can actually be enforced.",
   "keywords": [
     "ai-agents",
     "coding-agents",

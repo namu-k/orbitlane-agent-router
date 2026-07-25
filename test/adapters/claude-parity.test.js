@@ -28,4 +28,5 @@ test("Claude generated report capabilities match the fixture-backed Tier 1 capab
 
   assert.deepEqual(fixture, claudeTier1CapabilityMatrix());
   assert.deepEqual(report.capabilities, claudeTier1CapabilityMatrix());
+  assert.deepEqual(report.capabilities.native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
 });
