@@ -106,7 +106,6 @@ async function receiptAdapters(options) {
   if (selected.includes("codex")) result.codex = Object.freeze({ ...resolved.codex, spawnGuardCommand: false });
   if (selected.includes("claude")) {
     const report = await readJsonIfPossible(resolved.claude.generatedPath);
-    const settings = await readJsonIfPossible(resolved.claude.settingsPath);
     const receipt = report?.receipt;
     // Delete authority never rests on a capability description. Either a versioned
     // receipt names the shape, or — for an install written before this receipt
@@ -120,12 +119,14 @@ async function receiptAdapters(options) {
 
     if (report !== undefined && shape === "guidance-only") {
       // Nothing was ever written to settings.json, so there is nothing to prove or remove.
-      result.claude = Object.freeze({ ...resolved.claude, spawnGuardCommand: false });
+      const { settingsPath, ...guidanceOnlyPaths } = resolved.claude;
+      result.claude = Object.freeze({ ...guidanceOnlyPaths, spawnGuardCommand: false });
     } else {
       // Ownership must be proven where removal actually happens. mergeSettings only
       // strips hooks under the Agent matcher, so accepting the command under any
       // matcher would report a successful uninstall while leaving the entry in place
       // and deleting the runtime it points at.
+      const settings = await readJsonIfPossible(resolved.claude.settingsPath);
       const installed = (settings?.hooks?.PreToolUse ?? [])
         .filter((entry) => entry?.matcher === "Agent")
         .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))

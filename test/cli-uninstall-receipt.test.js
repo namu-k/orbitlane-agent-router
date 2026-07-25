@@ -120,6 +120,25 @@ test("a guidance-only receipt uninstalls without touching settings", async (t) =
   assert.deepEqual(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")), foreign);
 });
 
+test("a guidance-only receipt never rewrites settings when a legacy guard command remains", async (t) => {
+  const { contractPath, claudeHome, env } = await isolated(t);
+  await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env });
+
+  const reportPath = join(claudeHome, ".orbitlane", "claude-report.json");
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.receipt = { version: 1, install_shape: "guidance-only" };
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  const command = report.settings_projection.guard_command;
+  const settingsPath = join(claudeHome, "settings.json");
+  const before = `{  "hooks" : { "PreToolUse" : [ { "matcher" : "Agent" , "hooks" : [ { "type" : "command" , "command" : ${JSON.stringify(command)} } ] } ] } }\n`;
+  await writeFile(settingsPath, before, "utf8");
+
+  const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
+
+  assert.equal(result.code, 0);
+  assert.equal(await readFile(settingsPath, "utf8"), before);
+});
+
 test("a report with neither a receipt nor a guard command refuses to touch an existing hook", async (t) => {
   const { contractPath, claudeHome, env } = await isolated(t);
   await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env });
