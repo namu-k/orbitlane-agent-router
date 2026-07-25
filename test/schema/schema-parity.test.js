@@ -40,6 +40,14 @@ test("the JSON schema and validateRoles agree on absent versus empty roles", asy
   assert.equal(contractSchema.properties.roles.minProperties, 1, "an empty roles object must stay invalid");
 });
 
+test("the JSON schema mirrors the marker-safe model-token grammar", async () => {
+  const contractSchema = await schema("contract.schema.json");
+  assert.equal(
+    contractSchema.$defs.modelBinding.properties.model.pattern,
+    "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+  );
+});
+
 test("capability-matrix.schema.json reasoning consts match the enforced capability", async () => {
   const capabilitySchema = await schema("capability-matrix.schema.json");
   const { reasoning } = claudeCapabilityMatrix();

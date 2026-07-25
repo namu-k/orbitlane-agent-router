@@ -93,9 +93,9 @@ roles를 선언한 Claude 설치를 uninstall하면 그 사본과 snapshot 저�
         ▼
 이식 가능한 OrbitLane contract
         │
-        ├──► Codex / OMX adapter ──► native agent/model 설정
+        ├──► Codex / OMX adapter ──► AGENTS.md guidance와 생성된 report evidence
         │
-        └──► Claude adapter ───────► CLAUDE.md, settings, subagent 정의
+        └──► Claude adapter ───────► CLAUDE.md, 생성된 report, 선택적 scoped settings hook
 
         ▼
 Capability probe ──► tier 결정 ──► static audit
@@ -140,7 +140,7 @@ OrbitLane은 유용한 라우팅과 runtime 증거가 필요한 주장을 분리
 
 | Capability | Tier 1: configuration routing | Tier 2: runtime-enforced routing |
 | --- | --- | --- |
-| Native configuration 생성 | 가능 | 가능 |
+| Native agent/model configuration 생성 | 생성된 evidence만 제공 | 가능 |
 | Semantic policy projection | 가능 | 가능 |
 | 선언된 모든 역할 검증 | 가능 | 가능 |
 | Configuration drift 탐지 | 가능 | 가능 |
@@ -148,7 +148,7 @@ OrbitLane은 유용한 라우팅과 runtime 증거가 필요한 주장을 분리
 | 지원되지 않는 모든 spawn 사전 차단 | 불가 | 필수 |
 | Spawn 후 실제 role/model/reasoning 증명 | 불가 | 필수 |
 
-Tier 1은 정상적이고 유용한 운영 모드입니다. 지원되는 native configuration을 결정적이고 감사 가능하게 만듭니다. 다만 모든 runtime 경로가 요청된 model을 사용했다고 주장하지 않습니다.
+Tier 1은 정상적이고 유용한 운영 모드입니다. marker-bounded guidance와 생성된 audit evidence를 작성하지만, Codex native agent/model configuration이나 Claude custom subagent definition file을 설치하지는 않습니다. 또한 모든 runtime 경로가 요청된 model을 사용했다고 주장하지 않습니다.
 
 contract가 roles를 선언하면 v1 Claude Code adapter는 Agent tool 호출에 대한 **scoped** request-consistency check(불일치 시 deny)를 추가로 강제합니다. 이는 별도 tier가 아니라 Tier 1 내부의 한정된 capability(`claude_agent_pre_dispatch`)로 보고되며, 실제 실행 model의 보장도 아니고 모든 spawn path를 포함한다는 주장도 아닙니다.
 
@@ -164,8 +164,8 @@ Receipt는 언제나 요청된 route를 기록할 수 있습니다. 실제 route
 
 | Runtime | 계획된 adapter 상태 | 초기 enforcement 목표 |
 | --- | --- | --- |
-| OMX를 사용하는 Codex | v1 | Tier 1 configuration과 audit |
-| Claude Code | v1 | Tier 1 configuration과 audit; capability probe 통과 시에만 더 강한 enforcement |
+| OMX를 사용하는 Codex | v1 | Tier 1 guidance와 생성된 audit evidence; native agent/model configuration을 설치하지 않음 |
+| Claude Code | v1 | Tier 1 guidance와 생성된 audit evidence; 선언된 roles는 custom subagent definition 설치가 아닌 scoped request-consistency hook을 opt in |
 | OpenCode | 연구 roadmap | native agent와 category orchestration을 참고한 contract mapping |
 
 지원 표에는 일반적인 호환성 추측이 아니라 검증된 adapter 동작만 기록합니다.
@@ -191,15 +191,15 @@ OrbitLane은 이를 보완하는 접근입니다. Vendor-neutral routing contrac
 Codex/OMX adapter는 다음을 projection합니다.
 
 - `AGENTS.md` 내부의 네 줄 marker 기반 guidance block.
-- effective runtime binding을 주장하지 않는 guidance-only status와 static audit evidence.
+- 생성된 guidance-only report와 static audit evidence. Codex native agent/model configuration은 설치하지 않으며 `effective_model`은 `unproven`으로 남습니다.
 
 Claude Code adapter는 다음을 projection합니다.
 
 - `CLAUDE.md` 내부의 같은 네 줄 marker 기반 guidance block.
-- `roles`가 선언된 경우에만 native `model`·effort가 포함된 custom subagent, 기존 내용을 보존하는 settings, scoped guard.
-- request-consistency check와 증명된 runtime enforcement를 구분하는 capability evidence.
+- 생성된 report. 그 안의 subagent 모양 항목은 요청 route evidence이며 설치된 Claude custom subagent definition file이 아닙니다.
+- `roles`가 선언된 경우에만 기존 내용을 보존하는 settings와 scoped guard request-consistency check를 추가하며, 이는 실제 실행 model의 보장이 아닙니다.
 
-Claude Code는 custom subagent 정의의 model 선택과 해석 순서를 [Create custom subagents](https://code.claude.com/docs/en/sub-agents)에서 공식 지원합니다. [Hooks reference](https://code.claude.com/docs/en/hooks)는 차단 가능한 event와 관찰 또는 context 주입만 가능한 lifecycle event를 구분합니다. OrbitLane은 이 native 보장 범위를 마케팅 문구로 넓히지 않습니다.
+Claude Code는 custom subagent 정의의 model 선택과 해석 순서를 [Create custom subagents](https://code.claude.com/docs/en/sub-agents)에서 공식 지원합니다. OrbitLane 0.3.0은 그 파일을 설치하지 않습니다. [Hooks reference](https://code.claude.com/docs/en/hooks)는 차단 가능한 event와 관찰 또는 context 주입만 가능한 lifecycle event를 구분하며 OrbitLane의 scoped check도 그 경계를 넘지 않습니다.
 
 ## Cross-platform 설계
 

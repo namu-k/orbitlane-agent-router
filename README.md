@@ -95,9 +95,9 @@ User routing intent
         ▼
 Portable OrbitLane contract
         │
-        ├──► Codex / OMX adapter ──► native agent and model configuration
+        ├──► Codex / OMX adapter ──► AGENTS.md guidance and generated report evidence
         │
-        └──► Claude adapter ───────► CLAUDE.md, settings, and subagent definitions
+        └──► Claude adapter ───────► CLAUDE.md, generated report, and optional scoped settings hook
 
         ▼
 Capability probe ──► tier decision ──► static audit
@@ -143,7 +143,7 @@ OrbitLane separates useful routing from claims that require runtime proof.
 
 | Capability | Tier 1: configuration routing | Tier 2: runtime-enforced routing |
 | --- | --- | --- |
-| Generate native configuration | Yes | Yes |
+| Generate native agent/model configuration | Generated evidence only | Yes |
 | Project semantic policy | Yes | Yes |
 | Validate every declared role | Yes | Yes |
 | Detect configuration drift | Yes | Yes |
@@ -151,7 +151,7 @@ OrbitLane separates useful routing from claims that require runtime proof.
 | Block every unsupported spawn before dispatch | No | Required |
 | Prove effective role, model, and reasoning after spawn | No | Required |
 
-Tier 1 is a normal, useful operating mode. It makes supported native configuration deterministic and auditable. It does **not** claim that every runtime path used the requested model.
+Tier 1 is a normal, useful operating mode. It writes marker-bounded guidance and generated audit evidence; it does not install native Codex agent/model configuration or Claude custom subagent definition files. It does not claim that every runtime path used the requested model.
 
 When a contract declares roles, the v1 Claude Code adapter additionally enforces a **scoped** request-consistency check on the Agent tool (deny on mismatch). This is reported inside Tier 1 as a bounded capability (`claude_agent_pre_dispatch`), not a separate tier, not a guarantee of the executing model, and not a claim over every spawn path.
 
@@ -167,8 +167,8 @@ A receipt can always record a requested route. It may record an effective route 
 
 | Runtime | Planned adapter status | Initial enforcement target |
 | --- | --- | --- |
-| Codex with OMX | v1 | Tier 1 configuration and audit |
-| Claude Code | v1 | Tier 1 configuration and audit; stronger enforcement only when capability probes pass |
+| Codex with OMX | v1 | Tier 1 guidance and generated audit evidence; no native agent/model configuration is installed |
+| Claude Code | v1 | Tier 1 guidance and generated audit evidence; declared roles opt into a scoped request-consistency hook, not custom subagent-definition installation |
 | OpenCode | Research roadmap | Contract mapping informed by native agents and category-based orchestration |
 
 The support matrix reports verified adapter behavior, not general compatibility assumptions.
@@ -194,15 +194,15 @@ OrbitLane takes a complementary approach: preserve a vendor-neutral routing cont
 The Codex/OMX adapter projects:
 
 - The four-line marker-bounded guidance block in `AGENTS.md`.
-- Guidance-only status and static audit evidence, without claiming effective runtime binding.
+- A generated guidance-only report with static audit evidence. It installs no Codex native agent/model configuration; `effective_model` remains `unproven`.
 
 The Claude Code adapter projects:
 
 - The same four-line marker-bounded guidance block in `CLAUDE.md`.
-- Custom subagent definitions, merge-preserving settings, and the scoped guard only when `roles` is declared.
-- Capability evidence that distinguishes a request-consistency check from proven runtime enforcement.
+- A generated report. Its subagent-shaped entries are requested-route evidence, not installed Claude custom subagent definition files.
+- When `roles` is declared, merge-preserving settings and a scoped guard request-consistency check; this is not a guarantee of the executing model.
 
-Claude Code officially supports model selection in custom subagent definitions and documents its resolution order in [Create custom subagents](https://code.claude.com/docs/en/sub-agents). Its [hooks reference](https://code.claude.com/docs/en/hooks) also distinguishes blockable events from lifecycle events that can only observe or inject context. OrbitLane will use those native guarantees without widening them through marketing language.
+Claude Code officially supports model selection in custom subagent definitions and documents its resolution order in [Create custom subagents](https://code.claude.com/docs/en/sub-agents). OrbitLane 0.3.0 does not install those files. Its [hooks reference](https://code.claude.com/docs/en/hooks) also distinguishes blockable events from lifecycle events that can only observe or inject context; OrbitLane's scoped check stays within that boundary.
 
 ## Cross-platform design
 

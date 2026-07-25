@@ -17,7 +17,11 @@ const ROLE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 // A model string is interpolated directly into the marker-bounded policy block, so it
 // must stay on one line and must not carry comment delimiters that could close the
 // block early. Conservative on purpose: provider model names are plain tokens.
-const MODEL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+export const MODEL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export function isMarkerSafeModelToken(model) {
+  return typeof model === "string" && MODEL_TOKEN.test(model);
+}
 
 const addUnexpectedKeys = (value, allowedKeys, path, errors) => {
   for (const key of Object.keys(value)) {
@@ -132,7 +136,7 @@ function validateTargets(targets, errors) {
       addUnexpectedKeys(binding, ["model", "provenance"], bindingPath, errors);
       if (typeof binding.model !== "string" || binding.model.length === 0) {
         errors.push(`${bindingPath}.model must be a non-empty string`);
-      } else if (!MODEL_TOKEN.test(binding.model)) {
+      } else if (!isMarkerSafeModelToken(binding.model)) {
         errors.push(`${bindingPath}.model must be a marker-safe single-line token (UNSAFE_MODEL_TOKEN)`);
       }
       if (typeof binding.provenance !== "string" || binding.provenance.length === 0) {

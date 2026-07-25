@@ -138,6 +138,10 @@ test("the READMEs separate guidance from enforcement", async () => {
     assert.doesNotMatch(text, /Contract routes:/, "the role-table projection is gone");
   }
   assert.match(english, /guidance/i);
+  assert.match(english, /does not install native Codex agent\/model configuration or Claude custom subagent definition files/i);
+  assert.match(english, /subagent-shaped entries are requested-route evidence, not installed Claude custom subagent definition files/i);
+  assert.match(korean, /Codex native agent\/model configuration이나 Claude custom subagent definition file을 설치하지는 않습니다/);
+  assert.match(korean, /요청 route evidence이며 설치된 Claude custom subagent definition file이 아닙니다/);
 });
 
 test("spawn guard decision p95 remains below the 50ms local budget", () => {

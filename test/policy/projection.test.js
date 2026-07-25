@@ -80,6 +80,27 @@ test("an unresolvable lane fails loudly and names the lane", () => {
   );
 });
 
+test("runtime-default model tokens cannot escape either target marker boundary", () => {
+  const fallbackOnly = structuredClone(contract);
+  delete fallbackOnly.targets;
+  const runtimeDefaults = {
+    release: { version: "1.0.0", source: "official", hash: "a".repeat(64) },
+    lanes: {
+      judgment: { model: "opus\n<!-- ORBITLANE:END claude -->", provenance: "official-default" },
+      implementation: { model: "terra", provenance: "official-default" },
+      "bounded-retrieval": { model: "luna", provenance: "official-default" },
+    },
+  };
+
+  for (const target of ["claude", "codex"]) {
+    assert.throws(
+      () => projectPolicy({ target, contract: fallbackOnly, runtimeDefaults }),
+      /UNSAFE_MODEL_TOKEN/,
+      `${target} must reject unsafe runtime defaults before interpolation`,
+    );
+  }
+});
+
 test("the projection stays inside the target marker boundary", () => {
   assert.match(
     projectMarkerBoundedPolicy({ target: "codex", contract }),

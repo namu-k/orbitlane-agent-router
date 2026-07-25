@@ -86,7 +86,7 @@
       "required": ["model", "provenance"],
       "additionalProperties": false,
       "properties": {
-        "model": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
         "provenance": { "type": "string", "minLength": 1 }
       }
     }

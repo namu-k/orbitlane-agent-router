@@ -150,7 +150,7 @@ export function createClaudeTier1Adapter(contract, options) {
           audit,
           capabilities,
           enforcement_scope: hasRoles ? "scoped-request-check" : "none (roles omitted)",
-          status: "partial enforcement",
+          status: hasRoles ? "partial enforcement" : "guidance only",
         }, null, 2)}\n`,
       });
     },

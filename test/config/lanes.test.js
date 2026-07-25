@@ -62,3 +62,14 @@ test("each target reads its own bindings", () => {
 test("reasoning comes from the lane definition", () => {
   assert.equal(resolveLaneModels(contract, "claude").terra.reasoning, "medium");
 });
+
+test("unsafe runtime-default model tokens fail closed for both targets", () => {
+  const unsafeDefaults = structuredClone(officialDefaults);
+  unsafeDefaults.lanes.judgment.model = "opus\n<!-- ORBITLANE:END claude -->";
+
+  for (const target of ["claude", "codex"]) {
+    const lanes = resolveLaneModels(contract, target, unsafeDefaults);
+    assert.equal(lanes.sol.resolved, false, `${target} must reject the unsafe default`);
+    assert.equal(lanes.sol.reason, "UNSAFE_MODEL_TOKEN");
+  }
+});

@@ -222,6 +222,16 @@ function adapters(contract, options) {
   return Object.freeze(result);
 }
 
+function preflightAdapters(contract, options) {
+  const targetAdapters = adapters(contract, options);
+  const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
+  const failures = {};
+  for (const target of selected) {
+    try { targetAdapters[target].render(); } catch (error) { failures[target] = error; }
+  }
+  return Object.freeze(failures);
+}
+
 // The snapshot store and the vendored hook runtime exist only to serve the Claude
 // report. Once that report is gone nothing can reach them again, so a successful
 // Claude uninstall reclaims them. The heartbeat log is evidence, not derived state,
@@ -277,18 +287,19 @@ async function main() {
   // Everything the Claude target needs before its adapter exists. A failure here is
   // carried into adapters() as that target's failure so a --target both run still
   // installs Codex, matching how adapter construction already isolates targets.
-  let prepared = {};
-  try {
-    const transitionAction = await claudeTransitionAction(options, claudeGuardEnabled);
-    const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
-    if (persist && claudeGuardEnabled) await vendorHookRuntime(claudeRoot);
-    const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
-    const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
-    prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256, ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
-  } catch (error) {
-    if (options.target === "codex") prepared = {};
-    else if (options.target === "claude") throw error;
-    else prepared = { claudePreparationError: error };
+  const preflightFailures = preflightAdapters(contract, { ...options, runtimeDefaults, claudeGuardEnabled });
+  let prepared = preflightFailures.claude === undefined ? {} : { claudePreparationError: preflightFailures.claude };
+  if (claudeSelected && preflightFailures.claude === undefined) {
+    try {
+      const transitionAction = await claudeTransitionAction(options, claudeGuardEnabled);
+      const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
+      if (persist && claudeGuardEnabled) await vendorHookRuntime(claudeRoot);
+      const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
+      const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
+      prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256, ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
+    } catch (error) {
+      prepared = { claudePreparationError: error };
+    }
   }
 
   const targetAdapters = adapters(contract, { ...options, runtimeDefaults, claudeGuardEnabled, ...prepared });

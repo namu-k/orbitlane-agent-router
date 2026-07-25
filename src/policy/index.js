@@ -1,6 +1,6 @@
 import { assertCatalogCompatible } from "../catalog/index.js";
 import { resolveLaneModels } from "../config/lanes.js";
-import { validateContract } from "../schema/index.js";
+import { isMarkerSafeModelToken, validateContract } from "../schema/index.js";
 
 // The projected kernel. Four lines: a delegation nudge, the main-session boundary
 // (which also carries escalation), this target's tier->model binding, and the one
@@ -27,7 +27,9 @@ export function projectPolicy({ target, contract, runtimeDefaults }) {
   // The kernel embeds all three model names, so an unresolved lane has no honest
   // rendering. Fail rather than emit a placeholder or drop the line.
   for (const laneId of KERNEL_LANES) {
+    if (lanes[laneId]?.reason === "UNSAFE_MODEL_TOKEN") throw new TypeError(`UNSAFE_MODEL_TOKEN: runtime default for ${laneId} cannot appear in a marker-bounded projection`);
     if (lanes[laneId]?.resolved !== true) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${laneId} for target ${target}`);
+    if (!isMarkerSafeModelToken(lanes[laneId].model)) throw new TypeError(`UNSAFE_MODEL_TOKEN: ${laneId} cannot appear in a marker-bounded projection`);
   }
 
   const body = KERNEL
