@@ -94,17 +94,21 @@ function nativeSubagentDefinition(role, route, instructions) {
 
 export function createClaudeTier1Adapter(contract, options) {
   const routes = resolveClaudeRequestedRoutes(contract, options.runtimeDefaults);
+  const hasRoles = Object.keys(routes).length > 0;
   const audit = auditInstalledRoles(contract, options.installedRoles ?? []);
   const subagents = Object.fromEntries(Object.entries(routes).map(([role, route]) => [role, subagentProjection(role, route)]));
   const nativeArtifacts = Object.fromEntries(Object.entries(subagents).map(([role, subagent]) => [
     `${role}.md`, nativeSubagentDefinition(role, routes[role], subagent.instructions),
   ]));
-  const capabilities = probeClaudeTier1Capabilities({
+  const probedCapabilities = probeClaudeTier1Capabilities({
     runtime: options.runtime,
     supportsVersion: options.supportsVersion,
     nativeArtifacts: Object.entries(nativeArtifacts).map(([path, content]) => ({ path, content })),
     expectedRoutes: routes,
   });
+  const capabilities = hasRoles
+    ? probedCapabilities
+    : Object.freeze({ ...probedCapabilities, native_role_configuration: "not-applicable" });
   const settingsProjection = options.spawnGuardCommand === undefined
     ? Object.freeze({ hooks: Object.freeze({}) })
     : Object.freeze({ hooks: Object.freeze({ PreToolUse: Object.freeze([{ matcher: "Agent", hooks: Object.freeze([{ type: "command", command: options.spawnGuardCommand }]) }]) }) });
@@ -142,6 +146,7 @@ export function createClaudeTier1Adapter(contract, options) {
           ...(options.spawnGuardCommand === undefined ? {} : { settings_projection: { ...settingsProjection, guard_command: options.spawnGuardCommand } }),
           audit,
           capabilities,
+          enforcement_scope: hasRoles ? "scoped-request-check" : "none (roles omitted)",
           status: "partial enforcement",
         }, null, 2)}\n`,
       });

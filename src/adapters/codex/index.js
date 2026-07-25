@@ -62,7 +62,8 @@ export function createCodexTier1Adapter(contract, options) {
           }])),
           audit,
           capabilities: codexCapabilityMatrix(),
-          status: "partial enforcement",
+          enforcement_scope: "none (guidance only)",
+          status: "guidance only",
         }, null, 2)}\n`,
       });
     },

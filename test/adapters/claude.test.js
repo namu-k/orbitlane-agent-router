@@ -156,3 +156,47 @@ test("projects stable Claude subagents and an honest Tier 1 report without trans
   });
   assert.deepEqual(generated.capabilities.claude_agent_pre_dispatch, { status: "unproven", scope: "Agent tool only" });
 });
+
+test("a roles-less install claims no native configuration and no enforcement", () => {
+  const rolesLess = {
+    contract_version: "1.0.0",
+    lanes: {
+      sol: { class: "judgment", reasoning: "high" },
+      terra: { class: "implementation", reasoning: "medium" },
+      luna: { class: "bounded-retrieval", reasoning: "low" },
+    },
+    targets: {
+      claude: {
+        lanes: {
+          sol: { model: "opus", provenance: "user-local" },
+          terra: { model: "sonnet", provenance: "user-local" },
+          luna: { model: "haiku", provenance: "user-local" },
+        },
+      },
+    },
+  };
+
+  const adapter = createClaudeTier1Adapter(rolesLess, {
+    instructionPath: "/tmp/CLAUDE.md",
+    generatedPath: "/tmp/claude-report.json",
+    settingsPath: "/tmp/settings.json",
+    contractSha256: "a".repeat(64),
+  });
+  const report = JSON.parse(adapter.render(rolesLess).generated);
+
+  assert.equal(report.enforcement_scope, "none (roles omitted)");
+  assert.equal(report.capabilities.native_role_configuration, "not-applicable");
+  assert.deepEqual(report.requested_routes, {});
+});
+
+test("a roles-bearing install names its scoped enforcement", () => {
+  const report = JSON.parse(createClaudeTier1Adapter(contract, {
+    instructionPath: "/tmp/CLAUDE.md",
+    generatedPath: "/tmp/claude-report.json",
+    settingsPath: "/tmp/settings.json",
+    contractSha256: "a".repeat(64),
+    runtimeDefaults,
+  }).render(contract).generated);
+
+  assert.equal(report.enforcement_scope, "scoped-request-check");
+});

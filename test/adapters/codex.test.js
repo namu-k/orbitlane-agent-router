@@ -57,8 +57,38 @@ test("emits a Tier 1 report with separate requested receipts and unproven native
   assert.equal(generated.configuration_enforced, false);
   assert.equal(generated.semantic_policy_audited, true);
   assert.equal(generated.role_binding_enforced, false);
-  assert.equal(generated.status, "partial enforcement");
+  assert.equal(generated.status, "guidance only");
   assert.deepEqual(generated.audit.unmanaged, ["third-party"]);
   assert.deepEqual(generated.requested_routes.architect, { requested_model: "codex-sol", resolution: "target-binding", provenance: "user-local", effective_model: "unproven" });
   assert.deepEqual(generated.capabilities, codexCapabilityMatrix());
+});
+
+test("codex never claims enforcement it does not have", () => {
+  const contract = {
+    contract_version: "1.0.0",
+    lanes: {
+      sol: { class: "judgment", reasoning: "high" },
+      terra: { class: "implementation", reasoning: "medium" },
+      luna: { class: "bounded-retrieval", reasoning: "low" },
+    },
+    roles: { executor: { lane: "terra", provenance: "user-approved" } },
+    targets: {
+      codex: {
+        lanes: {
+          sol: { model: "gpt-5.6-sol", provenance: "user-local" },
+          terra: { model: "gpt-5.6-terra", provenance: "user-local" },
+          luna: { model: "gpt-5.6-luna", provenance: "user-local" },
+        },
+      },
+    },
+  };
+
+  const report = JSON.parse(createCodexTier1Adapter(contract, {
+    instructionPath: "/tmp/AGENTS.md",
+    generatedPath: "/tmp/codex-report.json",
+  }).render(contract).generated);
+
+  assert.doesNotMatch(report.status, /partial enforcement/);
+  assert.equal(report.enforcement_scope, "none (guidance only)");
+  assert.equal(report.requested_routes.executor.effective_model, "unproven");
 });
