@@ -2,11 +2,11 @@
 
 [한국어](README.ko.md)
 
-> **Status: v0.2.0 is published to npm.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
+> **Status: v0.3.0 is prepared for release; npm publication is pending.** After publication, install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
 >
-> **Upgrading from v0.1.0 requires reinstalling.** The report schema and the guard argument contract both changed, and upgrading the package does not rewrite anything already installed. Until you reinstall a scope, its guard denies every Agent spawn with a self-describing error naming the layer to reinstall. See [CHANGELOG.md](CHANGELOG.md).
+> **Upgrading from v0.2.0: reinstalling is recommended, not required.** A package upgrade alone does not rewrite an installed scope, and existing guards keep working correctly. Reinstall each scope when you want the new projected instruction block. If a roles-bearing 0.2 contract has only the lane it used, add bindings (or use official runtime defaults) for all three lanes before reinstalling. See [CHANGELOG.md](CHANGELOG.md).
 
-OrbitLane is an open-source **routing contract compiler** that compiles one role-to-model routing contract into runtime-native configuration for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and a Claude Code-scoped spawn guard. A general-purpose runtime model router is the Tier 2 roadmap.
+OrbitLane is an open-source **routing contract compiler** that compiles one routing contract into runtime-native guidance for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and an opt-in Claude Code-scoped spawn guard for contracts that declare roles. A general-purpose runtime model router is the Tier 2 roadmap.
 
 OrbitLane does not proxy LLM API traffic. It routes **agent roles and task classes**—such as architecture, implementation, verification, and repository lookup—to user-selected model lanes.
 
@@ -20,7 +20,7 @@ OrbitLane makes the routing policy explicit and portable:
 - Map named roles and task shapes to those lanes.
 - Install only the adapter you need: Codex, Claude Code, or both.
 - Preserve user-owned content through marker-bounded merges.
-- Reject unclassified roles instead of silently assigning a model.
+- Declared roles are checked; runtime roles not declared in the contract pass through as unmanaged.
 - Audit configuration separately from runtime enforcement.
 - Report unsupported capabilities as `false` or `unproven`, never as implied success.
 
@@ -68,16 +68,26 @@ the nearest project report wins, and the global report is used only when no
 project report exists. A project therefore overrides the global baseline
 without the two guards disagreeing.
 
+A roles-less guidance-only Claude report installed in a project shadows a roles-bearing global report. Routed spawns are therefore treated as unmanaged and pass through rather than being checked by the global guard. This is a bounded scope-precedence consequence, not universal runtime enforcement.
+
 ### What install writes
 
-Installing the Claude target copies the guard runtime next to the report it
-reads, under `<config root>/.orbitlane/hook/`, and points the hook at that copy.
-The installed guard therefore keeps deciding after the package that installed it
-is gone, which is the normal end state for `npx` and `dlx`. `npx orbitlane
-install` is supported for every target and both layers.
+Every target receives a four-line instruction block as **guidance**. It carries
+that target's tier-to-model binding, but it is not enforcement. Codex installs
+guidance only: it has no guard and reports `effective_model` as `unproven`.
 
-Uninstalling the Claude target reclaims that copy along with the snapshot store.
-The heartbeat log is evidence and is left in place.
+**Opt-in enforcement** requires a contract that declares `roles`. Only then does
+the Claude target copy the guard runtime next to the report it reads, under
+`<config root>/.orbitlane/hook/`, and add the scoped hook to `settings.json`.
+The guard is a request-consistency check, not a guarantee of the executing
+model; `effective_model` remains `unproven`. A contract without `roles` installs
+guidance only: no `settings.json` hook and no vendored guard runtime. The
+installed Claude guard keeps deciding after the package that installed it is
+gone, which is the normal end state for `npx` and `dlx`. `npx orbitlane install`
+is supported for every target and both layers.
+
+For a roles-bearing Claude install, uninstalling reclaims that copy along with
+the snapshot store. The heartbeat log is evidence and is left in place.
 
 ## How coding-agent model routing works
 
@@ -87,9 +97,9 @@ User routing intent
         ▼
 Portable OrbitLane contract
         │
-        ├──► Codex / OMX adapter ──► native agent and model configuration
+        ├──► Codex / OMX adapter ──► AGENTS.md guidance and generated report evidence
         │
-        └──► Claude adapter ───────► CLAUDE.md, settings, and subagent definitions
+        └──► Claude adapter ───────► CLAUDE.md, generated report, and optional scoped settings hook
 
         ▼
 Capability probe ──► tier decision ──► static audit
@@ -113,11 +123,37 @@ OrbitLane uses semantic lanes rather than hard-coding a vendor's current model n
     "architect": { "lane": "sol",   "provenance": "user-approved" },
     "executor":  { "lane": "terra", "provenance": "user-approved" },
     "explore":   { "lane": "luna",  "provenance": "user-approved" }
+  },
+  "targets": {
+    "codex": {
+      "lanes": {
+        "sol":   { "model": "gpt-5.6-sol",   "provenance": "user-approved" },
+        "terra": { "model": "gpt-5.6-terra", "provenance": "user-approved" },
+        "luna":  { "model": "gpt-5.6-luna",  "provenance": "user-approved" }
+      }
+    },
+    "claude": {
+      "lanes": {
+        "sol":   { "model": "opus",   "provenance": "user-approved" },
+        "terra": { "model": "sonnet", "provenance": "user-approved" },
+        "luna":  { "model": "haiku",  "provenance": "user-approved" }
+      }
+    }
   }
 }
 ```
 
-Lanes carry a canonical id (`sol` / `terra` / `luna`) and a `class` (judgment / implementation / bounded-retrieval); public examples do not hard-code provider model names. Adapters resolve each lane to a supported model using the contract's optional per-target binding, else the runtime's official default for that lane class, recording the source; ambiguous resolution fails rather than guessing. A role the contract routes fails validation until classified with provenance (or under `--strict`); installed roles the contract does not route are reported as `unmanaged` and left untouched.
+Lanes carry a canonical id (`sol` / `terra` / `luna`) and a `class` (judgment / implementation / bounded-retrieval). To install the four-line kernel, all three lanes (`sol`, `terra`, and `luna`) for the selected target must resolve through that target's bindings or the runtime's official defaults; ambiguous resolution fails rather than guessing. `roles` is optional. If present, each routed role needs provenance; an omitted `roles` object deliberately selects guidance-only installation.
+
+For a Claude target bound to `sonnet`, `haiku`, and `opus`, the installed kernel
+is exactly these four English lines:
+
+```text
+- Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete.
+- Keep judgment that needs full context, discipline, or confidentiality in the main session. A delegate that meets a new consequential judgment outside its assigned scope stops and asks the main session to decide.
+- When delegating, use: execution -> sonnet, bounded lookup -> haiku, delegated verification and analysis -> opus.
+- Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.
+```
 
 ## Enforcement tiers
 
@@ -125,7 +161,7 @@ OrbitLane separates useful routing from claims that require runtime proof.
 
 | Capability | Tier 1: configuration routing | Tier 2: runtime-enforced routing |
 | --- | --- | --- |
-| Generate native configuration | Yes | Yes |
+| Generate native agent/model configuration | Generated evidence only | Yes |
 | Project semantic policy | Yes | Yes |
 | Validate every declared role | Yes | Yes |
 | Detect configuration drift | Yes | Yes |
@@ -133,9 +169,9 @@ OrbitLane separates useful routing from claims that require runtime proof.
 | Block every unsupported spawn before dispatch | No | Required |
 | Prove effective role, model, and reasoning after spawn | No | Required |
 
-Tier 1 is a normal, useful operating mode. It makes supported native configuration deterministic and auditable. It does **not** claim that every runtime path used the requested model.
+Tier 1 is a normal, useful operating mode. It writes marker-bounded guidance and generated audit evidence; it does not install native Codex agent/model configuration or Claude custom subagent definition files. It does not claim that every runtime path used the requested model.
 
-The v1 Claude Code adapter additionally enforces a **scoped** pre-dispatch check on the Agent tool (deny on mismatch). This is reported inside Tier 1 as a bounded capability (`claude_agent_pre_dispatch`), not a separate tier and not a claim over every spawn path.
+When a contract declares roles, the v1 Claude Code adapter additionally enforces a **scoped** request-consistency check on the Agent tool (deny on mismatch). This is reported inside Tier 1 as a bounded capability (`claude_agent_pre_dispatch`), not a separate tier, not a guarantee of the executing model, and not a claim over every spawn path.
 
 Tier 2 is selected only when the target runtime proves all three capabilities:
 
@@ -149,8 +185,8 @@ A receipt can always record a requested route. It may record an effective route 
 
 | Runtime | Planned adapter status | Initial enforcement target |
 | --- | --- | --- |
-| Codex with OMX | v1 | Tier 1 configuration and audit |
-| Claude Code | v1 | Tier 1 configuration and audit; stronger enforcement only when capability probes pass |
+| Codex with OMX | v1 | Tier 1 guidance and generated audit evidence; no native agent/model configuration is installed |
+| Claude Code | v1 | Tier 1 guidance and generated audit evidence; declared roles opt into a scoped request-consistency hook, not custom subagent-definition installation |
 | OpenCode | Research roadmap | Contract mapping informed by native agents and category-based orchestration |
 
 The support matrix reports verified adapter behavior, not general compatibility assumptions.
@@ -173,22 +209,18 @@ OrbitLane takes a complementary approach: preserve a vendor-neutral routing cont
 
 ## Codex and Claude adapter design
 
-The Codex/OMX adapter is expected to project:
+The Codex/OMX adapter projects:
 
-- Role-to-model and role-to-reasoning mappings.
-- A small marker-bounded policy block in `AGENTS.md`.
-- Generated model tables and native configuration where supported.
-- Capability and tier decision evidence.
-- Static verification without claiming effective runtime binding.
+- The four-line marker-bounded guidance block in `AGENTS.md`.
+- A generated guidance-only report with static audit evidence. It installs no Codex native agent/model configuration; `effective_model` remains `unproven`.
 
-The Claude Code adapter is expected to project:
+The Claude Code adapter projects:
 
-- A small marker-bounded policy block in `CLAUDE.md`.
-- Custom subagent definitions with native `model` and effort settings.
-- Merge-preserving settings and supported hooks.
-- Capability probes that distinguish configurable models from proven runtime enforcement.
+- The same four-line marker-bounded guidance block in `CLAUDE.md`.
+- A generated report. Its subagent-shaped entries are requested-route evidence, not installed Claude custom subagent definition files.
+- When `roles` is declared, merge-preserving settings and a scoped guard request-consistency check; this is not a guarantee of the executing model.
 
-Claude Code officially supports model selection in custom subagent definitions and documents its resolution order in [Create custom subagents](https://code.claude.com/docs/en/sub-agents). Its [hooks reference](https://code.claude.com/docs/en/hooks) also distinguishes blockable events from lifecycle events that can only observe or inject context. OrbitLane will use those native guarantees without widening them through marketing language.
+Claude Code officially supports model selection in custom subagent definitions and documents its resolution order in [Create custom subagents](https://code.claude.com/docs/en/sub-agents). OrbitLane 0.3.0 does not install those files. Its [hooks reference](https://code.claude.com/docs/en/hooks) also distinguishes blockable events from lifecycle events that can only observe or inject context; OrbitLane's scoped check stays within that boundary.
 
 ## Cross-platform design
 
@@ -223,7 +255,7 @@ Coding-agent model routing maps a task role or task shape to a model capability 
 
 ### Can user instructions activate the routing contract without Superpowers?
 
-Yes. The contract is workflow-independent. A user instruction, native agent definition, OMX workflow, Superpowers skill, or another adapter can select a declared role or task shape. The runtime adapter then projects that selection into the strongest configuration surface the runtime supports.
+Yes. The contract is workflow-independent. A user instruction, native agent definition, OMX workflow, Superpowers skill, or another adapter can select a declared role or task shape. Every contract projects guidance; declaring `roles` additionally opts the Claude target into its scoped request-consistency check.
 
 ### Does OrbitLane work without Tier 2?
 
@@ -260,7 +292,7 @@ No. The installer is designed to own only a clearly marked routing block and pre
 
 ## Project status
 
-OrbitLane v0.1.0 is published to npm as a Tier 1 CLI: contract compilation, a merge-preserving installer, Codex/OMX and Claude Code adapters, and a Claude Code-scoped spawn guard. Review should focus on the contract, claim boundaries, adapter interfaces, and cross-platform installation behavior. Universal runtime enforcement remains the Tier 2 roadmap.
+OrbitLane v0.3.0 is prepared for release with npm publication pending: contract compilation, a merge-preserving installer, target-specific four-line guidance for Codex/OMX and Claude Code, and an opt-in Claude Code-scoped request-consistency guard. The guard does not prove the executing model; `effective_model` remains `unproven`. Universal runtime enforcement remains the Tier 2 roadmap.
 
 ## Discoverability notes
 

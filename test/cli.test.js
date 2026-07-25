@@ -19,8 +19,8 @@ const contract = {
   },
   roles: { executor: { lane: "terra", provenance: "user-approved" } },
   targets: {
-    codex: { lanes: { terra: { model: "codex-terra", provenance: "fixture" } } },
-    claude: { lanes: { terra: { model: "claude-terra", provenance: "fixture" } } },
+    codex: { lanes: { sol: { model: "codex-sol", provenance: "fixture" }, terra: { model: "codex-terra", provenance: "fixture" }, luna: { model: "codex-luna", provenance: "fixture" } } },
+    claude: { lanes: { sol: { model: "claude-sol", provenance: "fixture" }, terra: { model: "claude-terra", provenance: "fixture" }, luna: { model: "claude-luna", provenance: "fixture" } } },
   },
 };
 
@@ -87,6 +87,52 @@ test("both preserves a successful target when another adapter cannot resolve a r
     const report = JSON.parse(error.stdout);
     return error.code === 1 && report.outcomes.codex.status === "installed" && report.outcomes.claude.status === "failed";
   });
+});
+
+test("CLI preflight leaves no Claude durable artifacts when its kernel cannot resolve", async (t) => {
+  const { configRoot, contractPath } = await fixture(t);
+  const claudeIncomplete = structuredClone(contract);
+  delete claudeIncomplete.targets.claude.lanes.luna;
+  await writeFile(contractPath, `${JSON.stringify(claudeIncomplete)}\n`);
+
+  await assert.rejects(invoke(["install", "--target", "both", "--config-root", configRoot, "--contract", contractPath]), (error) => {
+    const report = JSON.parse(error.stdout);
+    return error.code === 1 && report.outcomes.codex.status === "installed" && report.outcomes.claude.status === "failed";
+  });
+  assert.match(await readFile(join(configRoot, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/);
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "claude-report.json"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "contracts"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "hook", "guards", "claude-spawn-hook.js"), "utf8"));
+});
+
+test("CLI preflight rejects unsafe model tokens before Claude vendoring or snapshots", async (t) => {
+  const { configRoot, contractPath } = await fixture(t);
+  const unsafeClaude = structuredClone(contract);
+  unsafeClaude.targets.claude.lanes.sol.model = "claude-sol\n<!-- ORBITLANE:END claude -->";
+  await writeFile(contractPath, `${JSON.stringify(unsafeClaude)}\n`);
+
+  await assert.rejects(invoke(["install", "--target", "both", "--config-root", configRoot, "--contract", contractPath]), (error) => {
+    const report = JSON.parse(error.stdout);
+    return error.code === 1 && report.outcomes.codex.status === "installed" && report.outcomes.claude.status === "failed";
+  });
+  assert.match(await readFile(join(configRoot, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/);
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "claude-report.json"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "contracts"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "hook", "guards", "claude-spawn-hook.js"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".claude", "settings.json"), "utf8"));
+});
+
+test("CLI preflight rejects an invalid contract before any target writes", async (t) => {
+  const { configRoot, contractPath } = await fixture(t);
+  const invalid = structuredClone(contract);
+  invalid.lanes.terra.class = "judgment";
+  await writeFile(contractPath, `${JSON.stringify(invalid)}\n`);
+
+  await assert.rejects(invoke(["install", "--target", "claude", "--config-root", configRoot, "--contract", contractPath]), (error) => error.code === 2);
+  await assert.rejects(readFile(join(configRoot, "CLAUDE.md"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "claude-report.json"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "contracts"), "utf8"));
+  await assert.rejects(readFile(join(configRoot, ".orbitlane", "hook", "guards", "claude-spawn-hook.js"), "utf8"));
 });
 
 test("recover returns a nonzero exit code for an invalid manifest", async (t) => {

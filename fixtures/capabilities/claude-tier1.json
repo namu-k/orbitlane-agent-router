@@ -1,7 +1,7 @@
 {
   "native_role_configuration": {
-    "status": "configured",
-    "scope": "custom-subagent-definitions"
+    "status": "unproven",
+    "scope": "no-native-artifact-discovery"
   },
   "requested_route": {
     "status": "configured",

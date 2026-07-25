@@ -2,6 +2,50 @@
 
 This project is pre-1.0, so breaking changes raise the minor version.
 
+## 0.3.0
+
+### Migration from 0.2.0 — recommended, not required
+
+Package upgrade alone does not rewrite an installed scope. Reinstalling is
+optional for existing installs: the installed guard keeps working correctly, and
+reinstalling only picks up the new instruction block.
+
+Conditional contract migration: when reinstalling a roles-bearing 0.2 contract,
+all three lanes for each selected target must resolve through target bindings or
+official runtime defaults. A legacy contract that bound only its used lane keeps
+working until reinstall, but the 0.3.0 preflight fails before writes and names
+every unresolved kernel lane.
+
+To reinstall a scope:
+
+    npm install -g orbitlane@0.3.0
+    orbitlane install --global --target both --contract <path>
+
+A 0.3.0 CLI can uninstall a guard that 0.2.0 installed.
+
+### Changed
+
+- The projected policy block is now four lines carrying this target's tier-to-model
+  binding, replacing the sixteen policy lines, eleven delegation fixtures, and the
+  `Contract routes:` role table. Vanilla and OMX users receive identical guidance.
+- `roles` is optional. A contract without roles installs guidance only: no
+  `settings.json` hook and no vendored guard runtime.
+- Codex reports a guidance-only status instead of `partial enforcement`; it has no
+  guard and never had one. The Claude guard is a request-consistency check, not a
+  guarantee of the executing model, and `effective_model` stays `unproven`.
+
+### Fixed
+
+- A model string containing a newline and a marker delimiter could close the
+  `ORBITLANE` block early and inject text into `CLAUDE.md` / `AGENTS.md`. Model
+  strings are now validated as marker-safe single-line tokens before any write.
+- Lane-to-model resolution is shared by the projection and the guard, so the model
+  the kernel advertises and the model the guard expects in the request cannot
+  diverge. Codex now
+  requires an official release before trusting a runtime default, matching Claude.
+- A corrupt report no longer reads as "no hook installed" during a reinstall, which
+  could orphan a hook entry while reporting success.
+
 ## 0.2.0
 
 ### Migration from 0.1.0 — required

@@ -9,5 +9,21 @@
     "architect": { "lane": "sol", "provenance": "user-approved" },
     "executor": { "lane": "terra", "provenance": "user-approved" },
     "explore": { "lane": "luna", "provenance": "user-approved" }
+  },
+  "targets": {
+    "claude": {
+      "lanes": {
+        "sol": { "model": "claude-sol", "provenance": "fixture" },
+        "terra": { "model": "claude-terra", "provenance": "fixture" },
+        "luna": { "model": "claude-luna", "provenance": "fixture" }
+      }
+    },
+    "codex": {
+      "lanes": {
+        "sol": { "model": "codex-sol", "provenance": "fixture" },
+        "terra": { "model": "codex-terra", "provenance": "fixture" },
+        "luna": { "model": "codex-luna", "provenance": "fixture" }
+      }
+    }
   }
 }

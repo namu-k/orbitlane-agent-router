@@ -86,7 +86,7 @@ test("reinstalling over a v0.1 layout replaces the old hook entry instead of sta
     contract_version: "1.0.0",
     lanes: { sol: { class: "judgment", reasoning: "high" }, terra: { class: "implementation", reasoning: "medium" }, luna: { class: "bounded-retrieval", reasoning: "low" } },
     roles: { executor: { lane: "terra", provenance: "user-approved" } },
-    targets: { claude: { lanes: { terra: { model: "claude-terra", provenance: "fixture" } } } },
+    targets: { claude: { lanes: { sol: { model: "claude-sol", provenance: "fixture" }, terra: { model: "claude-terra", provenance: "fixture" }, luna: { model: "claude-luna", provenance: "fixture" } } } },
   })}\n`, "utf8");
 
   await execFileAsync(process.execPath, [cli, "install", "--target", "claude", "--config-root", projectRoot, "--contract", contractPath], { encoding: "utf8" });

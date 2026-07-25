@@ -10,6 +10,8 @@ import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
 import { evaluateClaudeAgentSpawn } from "../src/guards/claude-spawn.js";
+import { projectPolicy } from "../src/policy/index.js";
+import { validateContract } from "../src/schema/index.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -70,6 +72,12 @@ function packReport(stdout) {
   return archive;
 }
 
+function portableContractFromReadme(text) {
+  const match = /```json\r?\n([\s\S]*?)\r?\n```/.exec(text);
+  if (match === null) throw new TypeError("README has no JSON contract example");
+  return JSON.parse(match[1]);
+}
+
 test("release package is allowlisted, private-free, and ships its CLI", async () => {
   const [packageText, packed] = await Promise.all([
     readFile(packagePath, "utf8"),
@@ -106,10 +114,12 @@ test("public-safety scanner rejects representative private, artifact, and premat
   assert.notDeepEqual(publicSafetyIssues("README.md", ["orbitlane", "agent", "router", "t2"].join("-")), []);
 });
 
-test("README status is consistently post-publish and bounded to Tier 1 plus scoped guard", async () => {
+test("README status is release-ready with npm publication pending and bounded to Tier 1 plus scoped guard", async () => {
   const [english, korean] = await Promise.all([readFile(resolve(root, "README.md"), "utf8"), readFile(resolve(root, "README.ko.md"), "utf8")]);
-  assert.match(english, /published to npm/i);
-  assert.match(korean, /npm에 공개/);
+  assert.match(english, /v0\.3\.0 is prepared for release; npm publication is pending\./i);
+  assert.match(korean, /v0\.3\.0은 출시 준비가 되었고 npm 공개를 기다리고 있습니다\./);
+  assert.doesNotMatch(english, /v0\.3\.0 is published to npm/i);
+  assert.doesNotMatch(korean, /v0\.3\.0이 npm에 공개되었습니다/);
   for (const text of [english, korean]) {
     assert.match(text, /Tier 2 roadmap/i);
     assert.match(text, /scoped/i);
@@ -124,6 +134,65 @@ test("README status is consistently post-publish and bounded to Tier 1 plus scop
 
   const changelog = await readFile(resolve(root, "CHANGELOG.md"), "utf8");
   assert.match(changelog, new RegExp(`^## ${version.replace(/\./g, "\\.")}$`, "m"), `CHANGELOG must have a section for ${version}`);
+});
+
+test("the READMEs separate guidance from enforcement", async () => {
+  const [english, korean] = await Promise.all([
+    readFile(resolve(root, "README.md"), "utf8"),
+    readFile(resolve(root, "README.ko.md"), "utf8"),
+  ]);
+
+  for (const text of [english, korean]) {
+    assert.doesNotMatch(text, /Contract routes:/, "the role-table projection is gone");
+  }
+  assert.match(english, /guidance/i);
+  assert.match(english, /does not install native Codex agent\/model configuration or Claude custom subagent definition files/i);
+  assert.match(english, /subagent-shaped entries are requested-route evidence, not installed Claude custom subagent definition files/i);
+  assert.match(korean, /Codex native agent\/model configuration이나 Claude custom subagent definition file을 설치하지는 않습니다/);
+  assert.match(korean, /요청 route evidence이며 설치된 Claude custom subagent definition file이 아닙니다/);
+});
+
+test("the READMEs document the bounded roles-less Claude precedence consequence", async () => {
+  const [english, korean] = await Promise.all([
+    readFile(resolve(root, "README.md"), "utf8"),
+    readFile(resolve(root, "README.ko.md"), "utf8"),
+  ]);
+
+  assert.match(english, /roles-less guidance-only Claude report.*shadows a roles-bearing global report.*routed spawns.*unmanaged and pass through.*global guard/i);
+  assert.match(english, /This is a bounded scope-precedence consequence, not universal runtime enforcement\./);
+  assert.doesNotMatch(english, /scope-precedence consequence, universal runtime enforcement\./i);
+  assert.match(korean, /roles-less guidance-only Claude report.*roles-bearing 전역 report/);
+  assert.match(korean, /routed spawn.*전역 guard.*unmanaged.*통과/);
+  assert.match(korean, /이는 scope precedence의 제한된 결과이지 보편적인 runtime enforcement가 아닙니다\./);
+  assert.doesNotMatch(korean, /scope precedence의 보편적인 runtime enforcement 결과/);
+});
+
+test("the READMEs publish complete portable examples and the v0.2 migration boundary", async () => {
+  const [english, korean, changelog] = await Promise.all([
+    readFile(resolve(root, "README.md"), "utf8"),
+    readFile(resolve(root, "README.ko.md"), "utf8"),
+    readFile(resolve(root, "CHANGELOG.md"), "utf8"),
+  ]);
+
+  for (const text of [english, korean]) {
+    assert.match(text, /"targets":\s*\{/);
+    assert.match(text, /"codex":\s*\{/);
+    assert.match(text, /"claude":\s*\{/);
+    assert.match(text, /"sol":\s*\{\s*"model"/);
+    assert.match(text, /"terra":\s*\{\s*"model"/);
+    assert.match(text, /"luna":\s*\{\s*"model"/);
+    const contractExample = portableContractFromReadme(text);
+    assert.deepEqual(validateContract(contractExample), { valid: true, errors: [] });
+    for (const target of ["codex", "claude"]) {
+      assert.match(projectPolicy({ target, contract: contractExample }), /When delegating, use:/);
+    }
+  }
+  assert.match(english, /Declared roles are checked; runtime roles not declared in the contract pass through as unmanaged\./);
+  assert.match(korean, /선언된 roles는 검사하며 contract에 선언되지 않은 runtime role은 unmanaged로 통과합니다\./);
+  assert.match(english, /all three lanes \(`sol`, `terra`, and `luna`\).*selected target.*bindings or the runtime's official defaults/i);
+  assert.match(korean, /선택한 target.*세 lane\(`sol`, `terra`, `luna`\).*binding 또는 runtime의 공식 default/i);
+  assert.match(changelog, /Package upgrade alone does not rewrite an installed scope\./);
+  assert.match(changelog, /Conditional contract migration/);
 });
 
 test("spawn guard decision p95 remains below the 50ms local budget", () => {

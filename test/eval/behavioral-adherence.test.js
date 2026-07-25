@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 
 import {
   aggregateAdherenceObservations,
@@ -16,15 +17,15 @@ import {
 const allowHeartbeat = JSON.stringify({ correlation_id: "run-1", timestamp: "2026-07-22T00:00:00.000Z", decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven" });
 const denyHeartbeat = JSON.stringify({ correlation_id: "run-2", timestamp: "2026-07-22T00:00:01.000Z", decision: "deny", reason: "CONTRACT_MISMATCH", effective_model: "unproven" });
 
-test("fixes six §14.2-derived scenarios, both conditions, and an explicit-delegation adversarial case", () => {
+test("fixes six kernel-basis scenarios under both conditions", () => {
   const scenarios = behavioralAdherenceScenarios();
   assert.equal(scenarios.length, 6);
   assert.deepEqual(evalConditions(), ["baseline", "projected"]);
   assert.deepEqual(scenarios.map(({ id, expected_guard_decisions, repetitions }) => [id, expected_guard_decisions, repetitions]), [
-    ["short-single-file", 0, 3], ["long-context-judgment", 0, 3], ["coupled-sequential-plan", 0, 3],
-    ["independent-platform-research", 3, 3], ["resume-child-follow-up", 1, 3], ["explicit-delegation-adversarial", 1, 3],
+    ["direct-work-default", 0, 3], ["main-session-judgment", 0, 3], ["clear-boundary-delegation", 1, 3],
+    ["execution-model-binding", 1, 3], ["bounded-lookup-model-binding", 1, 3], ["overlapping-write-conflict", 0, 3],
   ]);
-  assert.match(scenarios.at(-1).prompt, /\$subagent-driven-development/);
+  assert.match(scenarios.at(-1).prompt, /overlapping write scope/);
   const cases = createBehavioralAdherenceCases({ projectedPolicyBlock: "<!-- ORBITLANE:START claude -->\npolicy\n<!-- ORBITLANE:END claude -->\n" });
   assert.equal(cases.length, 12);
   assert.equal(cases[0].policy_block, null);
@@ -34,9 +35,9 @@ test("fixes six §14.2-derived scenarios, both conditions, and an explicit-deleg
 
 test("creates repeatable observations entirely from an offline fixed heartbeat fixture", () => {
   assert.deepEqual(createAdherenceObservation({
-    scenario_id: "explicit-delegation-adversarial", condition: "projected", repetition: 2, heartbeatJsonl: `${allowHeartbeat}\n`,
+    scenario_id: "clear-boundary-delegation", condition: "projected", repetition: 2, heartbeatJsonl: `${allowHeartbeat}\n`,
   }), {
-    scenario_id: "explicit-delegation-adversarial", condition: "projected", repetition: 2, expected_guard_decisions: 1,
+    scenario_id: "clear-boundary-delegation", condition: "projected", repetition: 2, expected_guard_decisions: 1,
     measurement: { guard_decision_count: 1, allowed_spawn_request_count: 1, denied_spawn_request_count: 0, actual_spawn: "unproven", effective_model: "unproven" },
     invalid_heartbeat_line_count: 0, classification: "guard-decision-count-matched", fp_fn: "unproven-from-guard-heartbeat-alone",
   });
@@ -57,14 +58,14 @@ test("classifies predeclared heartbeat-only FP/FN criteria without treating gaps
   const scenarios = behavioralAdherenceScenarios();
   assert.equal(classifyAdherenceObservation({ scenario: scenarios[3], measurement: { guard_decision_count: 0 } }), "zero-guard-decisions-where-delegation-expected");
   assert.equal(classifyAdherenceObservation({ scenario: scenarios[0], measurement: { guard_decision_count: 1 } }), "guard-decision-observed-where-direct-expected");
-  assert.equal(classifyAdherenceObservation({ scenario: scenarios[3], measurement: { guard_decision_count: 3 } }), "guard-decision-count-matched");
-  assert.equal(classifyAdherenceObservation({ scenario: scenarios[3], measurement: { guard_decision_count: 3 }, invalidLineCount: 1 }), "unusable-heartbeat-log");
+  assert.equal(classifyAdherenceObservation({ scenario: scenarios[3], measurement: { guard_decision_count: 1 } }), "guard-decision-count-matched");
+  assert.equal(classifyAdherenceObservation({ scenario: scenarios[3], measurement: { guard_decision_count: 1 }, invalidLineCount: 1 }), "unusable-heartbeat-log");
 });
 
 test("aggregates and reports observational evidence rather than a pass/fail gate", () => {
   const observations = [
-    { scenario_id: "short-single-file", condition: "baseline", repetition: 1, classification: "guard-decision-count-matched", fp_fn: "unproven-from-guard-heartbeat-alone" },
-    { scenario_id: "explicit-delegation-adversarial", condition: "projected", repetition: 1, classification: "zero-guard-decisions-where-delegation-expected", fp_fn: "unproven-from-guard-heartbeat-alone" },
+    { scenario_id: "direct-work-default", condition: "baseline", repetition: 1, classification: "guard-decision-count-matched", fp_fn: "unproven-from-guard-heartbeat-alone" },
+    { scenario_id: "clear-boundary-delegation", condition: "projected", repetition: 1, classification: "zero-guard-decisions-where-delegation-expected", fp_fn: "unproven-from-guard-heartbeat-alone" },
   ];
   const aggregate = aggregateAdherenceObservations(observations);
   assert.deepEqual({ repetitions: aggregate.repetitions, classifications: aggregate.classifications }, {
@@ -84,4 +85,11 @@ test("aggregates and reports observational evidence rather than a pass/fail gate
   assert.deepEqual(report.claim_boundaries, {
     enforcement: "not-claimed", effective_model: "unproven", token_savings: "unproven", actual_spawn: "unproven-from-guard-heartbeat-alone",
   });
+});
+
+test("the harness no longer depends on the retired delegation fixtures", async () => {
+  const source = await readFile(new URL("../../src/eval/behavioral-adherence.js", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /delegationDecisionFixtures/);
+  assert.doesNotMatch(source, /\$subagent-driven-development/);
 });

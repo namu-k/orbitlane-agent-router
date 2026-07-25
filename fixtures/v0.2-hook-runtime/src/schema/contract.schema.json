@@ -3,7 +3,7 @@
   "$id": "https://orbitlane.dev/schema/contract-1.0.0.json",
   "title": "OrbitLane routing contract",
   "type": "object",
-  "required": ["contract_version", "lanes"],
+  "required": ["contract_version", "lanes", "roles"],
   "additionalProperties": false,
   "properties": {
     "contract_version": { "const": "1.0.0" },
@@ -86,7 +86,7 @@
       "required": ["model", "provenance"],
       "additionalProperties": false,
       "properties": {
-        "model": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        "model": { "type": "string", "minLength": 1 },
         "provenance": { "type": "string", "minLength": 1 }
       }
     }

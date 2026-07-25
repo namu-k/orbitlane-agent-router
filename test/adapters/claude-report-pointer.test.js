@@ -11,7 +11,7 @@ const contract = Object.freeze({
     luna: { class: "bounded-retrieval", reasoning: "low" },
   },
   roles: { executor: { lane: "terra", provenance: "user-approved" } },
-  targets: { claude: { lanes: { terra: { model: "claude-terra", provenance: "user-local" } } } },
+  targets: { claude: { lanes: { sol: { model: "claude-sol", provenance: "user-local" }, terra: { model: "claude-terra", provenance: "user-local" }, luna: { model: "claude-luna", provenance: "user-local" } } } },
 });
 
 const digest = "a".repeat(64);

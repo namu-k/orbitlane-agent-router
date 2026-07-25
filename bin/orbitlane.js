@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
-import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { cp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,7 @@ import { createCodexTier1Adapter } from "../src/adapters/codex/index.js";
 import { resolveTargetPaths } from "../src/config/paths.js";
 import { planSnapshot, writeSnapshot } from "../src/config/snapshots.js";
 import { loadJsonSource } from "../src/config/source.js";
+import { resolveEffectiveContract } from "../src/guards/resolve-contract.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,8 +94,87 @@ function failedAdapter(error, paths) {
   return Object.freeze({ ...paths, render: () => { throw error; } });
 }
 
+const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
+const digest = /^[a-f0-9]{64}$/;
+
+function transitionFailure(code, path) {
+  return Object.assign(new Error(`${code}: ${path}`), { code });
+}
+
+function hasAgentHook(settings, command) {
+  const entries = settings?.hooks?.PreToolUse;
+  if (!Array.isArray(entries)) return false;
+  return entries
+    .filter((entry) => entry?.matcher === "Agent")
+    .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+    .some((hook) => hook?.type === "command" && hook.command === command);
+}
+
+async function claudeTransitionAction(options, claudeGuardEnabled) {
+  if (options.command !== "install" || (options.target !== "claude" && options.target !== "both")) return undefined;
+  const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude;
+  let content;
+  try { content = await readFile(resolved.generatedPath, "utf8"); } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath);
+  }
+  let report;
+  try { report = JSON.parse(content); } catch { throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath); }
+  if (report === null || typeof report !== "object" || Array.isArray(report)) throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath);
+  const receipt = report.receipt;
+  const legacy = receipt?.version === undefined;
+  if (!legacy) {
+    if (receipt?.version !== 1 || !["guidance-only", "claude-managed-role-guard"].includes(receipt.install_shape)
+      || (receipt.install_shape === "claude-managed-role-guard" && (typeof receipt.guard_command !== "string" || receipt.guard_command.length === 0))) {
+      throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
+    }
+    let effective;
+    try { effective = await resolveEffectiveContract({ cwd: resolved.root, claudeConfigDir: resolved.root }); } catch (error) { throw transitionFailure(error?.code ?? "REPORT_UNREADABLE", resolved.generatedPath); }
+    let canonicalGeneratedPath;
+    try { canonicalGeneratedPath = await realpath(resolved.generatedPath); } catch { throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath); }
+    if (effective.reportPath !== canonicalGeneratedPath) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
+  }
+  if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
+  const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+  if (!legacy && (!report?.contract_snapshot || !digest.test(report.contract_snapshot.sha256 ?? ""))) throw transitionFailure("REPORT_POINTER_MISSING", resolved.generatedPath);
+  if ((legacy && (typeof command !== "string" || command.length === 0))
+    || (!legacy && (receipt?.version !== 1 || receipt.install_shape !== "claude-managed-role-guard" || typeof command !== "string" || command.length === 0))) {
+    throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
+  }
+  let settings;
+  try { settings = JSON.parse(await readFile(resolved.settingsPath, "utf8")); } catch { throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath); }
+  if (!hasAgentHook(settings, command)) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath);
+  if (claudeGuardEnabled) return undefined;
+  return Object.freeze({ kind: "remove-owned-hook", command, reportHash: sha256(content) });
+}
+
 async function readJsonIfPossible(path) {
   try { return JSON.parse(await readFile(path, "utf8")); } catch { return undefined; }
+}
+
+function guidanceOnlySettingsAreClear(settings, command) {
+  if (settings === null || typeof settings !== "object" || Array.isArray(settings)) return false;
+  if (settings.hooks === undefined) return true;
+  if (settings.hooks === null || typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) return false;
+  if (settings.hooks.PreToolUse === undefined) return true;
+  if (!Array.isArray(settings.hooks.PreToolUse)) return false;
+  for (const entry of settings.hooks.PreToolUse) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || typeof entry.matcher !== "string" || !Array.isArray(entry.hooks)) return false;
+    for (const hook of entry.hooks) {
+      if (hook === null || typeof hook !== "object" || Array.isArray(hook)) return false;
+      // Guidance-only receipts never grant deletion authority. Seeing the stale
+      // command anywhere is therefore an ambiguous ownership conflict, including
+      // a non-Agent matcher that the installer could not safely remove from.
+      if (hook.command === command) return false;
+    }
+  }
+  return true;
+}
+
+async function staleGuidanceCommandIsClear(settingsPath, command) {
+  let content;
+  try { content = await readFile(settingsPath, "utf8"); } catch (error) { return error?.code === "ENOENT"; }
+  try { return guidanceOnlySettingsAreClear(JSON.parse(content), command); } catch { return false; }
 }
 
 async function receiptAdapters(options) {
@@ -106,19 +186,42 @@ async function receiptAdapters(options) {
   if (selected.includes("codex")) result.codex = Object.freeze({ ...resolved.codex, spawnGuardCommand: false });
   if (selected.includes("claude")) {
     const report = await readJsonIfPossible(resolved.claude.generatedPath);
-    const command = report?.settings_projection?.guard_command;
-    const settings = await readJsonIfPossible(resolved.claude.settingsPath);
-    // Ownership must be proven where removal actually happens. mergeSettings only
-    // strips hooks under the Agent matcher, so accepting the command under any
-    // matcher would report a successful uninstall while leaving the entry in place
-    // and deleting the runtime it points at.
-    const installed = (settings?.hooks?.PreToolUse ?? [])
-      .filter((entry) => entry?.matcher === "Agent")
-      .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-      .some((hook) => hook?.type === "command" && hook.command === command);
-    result.claude = typeof command === "string" && command.length > 0 && installed
-      ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
-      : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
+    const receipt = report?.receipt;
+    // Delete authority never rests on a capability description. Either a versioned
+    // receipt names the shape, or — for an install written before this receipt
+    // existed — the pre-0.3.0 guard_command proof applies. A report carrying neither
+    // proves nothing and must not touch settings.json.
+    const versionedWithoutSchema = receipt?.version !== undefined && report?.schema_version !== 2;
+    const legacy = receipt?.version === undefined;
+    const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+    const shape = legacy
+      ? (typeof command === "string" && command.length > 0 ? "claude-managed-role-guard" : undefined)
+      : receipt?.version === 1 ? receipt.install_shape : undefined;
+
+    if (!versionedWithoutSchema && report !== undefined && shape === "guidance-only") {
+      const staleCommand = report?.settings_projection?.guard_command;
+      const clear = typeof staleCommand !== "string" || staleCommand.length === 0
+        || await staleGuidanceCommandIsClear(resolved.claude.settingsPath, staleCommand);
+      if (clear) {
+        // A proper guidance-only receipt has no settings ownership. Even after a
+        // read-only stale-command probe, keep settingsPath out of the adapter so
+        // the transaction layer cannot rewrite or remove any hook.
+        const { settingsPath, ...guidanceOnlyPaths } = resolved.claude;
+        result.claude = Object.freeze({ ...guidanceOnlyPaths, spawnGuardCommand: false });
+      } else {
+        result.claude = failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
+      }
+    } else {
+      // Ownership must be proven where removal actually happens. mergeSettings only
+      // strips hooks under the Agent matcher, so accepting the command under any
+      // matcher would report a successful uninstall while leaving the entry in place
+      // and deleting the runtime it points at.
+      const settings = await readJsonIfPossible(resolved.claude.settingsPath);
+      const installed = hasAgentHook(settings, command);
+      result.claude = !versionedWithoutSchema && shape === "claude-managed-role-guard" && typeof command === "string" && command.length > 0 && installed
+        ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
+        : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
+    }
   }
   return Object.freeze(result);
 }
@@ -127,7 +230,8 @@ function adapters(contract, options) {
   const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
   const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: selected });
   const codexPaths = resolved.codex;
-  const claudePaths = resolved.claude;
+  const { settingsPath, ...claudeGuidanceOnlyPaths } = resolved.claude;
+  const claudePaths = options.claudeTransitionAction !== undefined || options.claudeGuardEnabled !== false ? resolved.claude : claudeGuidanceOnlyPaths;
   const runtimeDefaults = options.runtimeDefaults === undefined ? undefined : options.runtimeDefaults;
   const generated = join(resolved.claude.root, ".orbitlane");
   const result = {};
@@ -140,16 +244,28 @@ function adapters(contract, options) {
       // failures belong to the Claude target, not to the whole run: --target both
       // must still install Codex.
       if (options.claudePreparationError !== undefined) throw options.claudePreparationError;
-      result.claude = createClaudeTier1Adapter(contract, {
+      result.claude = Object.freeze({ ...createClaudeTier1Adapter(contract, {
         ...claudePaths,
-        spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+        ...(options.claudeGuardEnabled === false ? {} : {
+          spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+        }),
         runtimeDefaults,
         contractSha256: options.contractSha256,
         runtimeDefaultsSha256: options.runtimeDefaultsSha256,
-      });
+      }), ...(options.claudeTransitionAction === undefined ? {} : { transitionAction: options.claudeTransitionAction }) });
     } catch (error) { result.claude = failedAdapter(error, claudePaths); }
   }
   return Object.freeze(result);
+}
+
+function preflightAdapters(contract, options) {
+  const targetAdapters = adapters(contract, options);
+  const selected = options.target === "both" ? ["codex", "claude"] : [options.target];
+  const failures = {};
+  for (const target of selected) {
+    try { targetAdapters[target].render(); } catch (error) { failures[target] = error; }
+  }
+  return Object.freeze(failures);
 }
 
 // The snapshot store and the vendored hook runtime exist only to serve the Claude
@@ -189,12 +305,16 @@ async function main() {
   const options = parse(process.argv.slice(2));
   if (options.command === "help") return null;
   if (options.command === "recover") return recoverRouting({ manifest: { path: resolve(options.manifest) } });
-  if (options.command === "uninstall" && options.contract === undefined) {
+  if (options.command === "uninstall") {
     return uninstall(options, await receiptAdapters(options));
   }
   const contractSource = await loadJsonSource(options.contract);
   const runtimeDefaultsSource = options.runtimeDefaults === undefined ? undefined : await loadJsonSource(options.runtimeDefaults);
   const contract = contractSource.value;
+  // Roles are what the guard enforces. Without them the install is guidance only:
+  // no hook entry, no vendored runtime. The snapshot is still written, because the
+  // report's contract pointer is what any other installed guard resolves through.
+  const claudeGuardEnabled = Object.keys(contract.roles ?? {}).length > 0;
   const runtimeDefaults = runtimeDefaultsSource?.value;
   const claudeSelected = options.target === "claude" || options.target === "both";
   const persist = options.command === "install" && options.dryRun !== true && claudeSelected;
@@ -203,20 +323,22 @@ async function main() {
   // Everything the Claude target needs before its adapter exists. A failure here is
   // carried into adapters() as that target's failure so a --target both run still
   // installs Codex, matching how adapter construction already isolates targets.
-  let prepared = {};
-  try {
-    const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
-    if (persist) await vendorHookRuntime(claudeRoot);
-    const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
-    const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
-    prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256 };
-  } catch (error) {
-    if (options.target === "codex") prepared = {};
-    else if (options.target === "claude") throw error;
-    else prepared = { claudePreparationError: error };
+  const preflightFailures = preflightAdapters(contract, { ...options, runtimeDefaults, claudeGuardEnabled });
+  let prepared = preflightFailures.claude === undefined ? {} : { claudePreparationError: preflightFailures.claude };
+  if (claudeSelected && preflightFailures.claude === undefined) {
+    try {
+      const transitionAction = await claudeTransitionAction(options, claudeGuardEnabled);
+      const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
+      if (persist && claudeGuardEnabled) await vendorHookRuntime(claudeRoot);
+      const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
+      const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
+      prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256, ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
+    } catch (error) {
+      prepared = { claudePreparationError: error };
+    }
   }
 
-  const targetAdapters = adapters(contract, { ...options, runtimeDefaults, ...prepared });
+  const targetAdapters = adapters(contract, { ...options, runtimeDefaults, claudeGuardEnabled, ...prepared });
   if (options.command === "uninstall") return uninstall(options, targetAdapters);
   return options.dryRun ? previewRouting(contract, { target: options.target, adapters: targetAdapters }) : installRouting(contract, { target: options.target, adapters: targetAdapters });
 }

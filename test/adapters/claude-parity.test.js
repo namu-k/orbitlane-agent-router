@@ -17,11 +17,16 @@ test("Claude generated report capabilities match the fixture-backed Tier 1 capab
     supportsVersion: () => true,
     runtimeDefaults: {
       release: { version: "1", source: "official", hash: "a".repeat(64) },
-      lanes: { implementation: { model: "claude-terra", provenance: "official-default" } },
+      lanes: {
+        judgment: { model: "claude-sol", provenance: "official-default" },
+        implementation: { model: "claude-terra", provenance: "official-default" },
+        "bounded-retrieval": { model: "claude-luna", provenance: "official-default" },
+      },
     },
   }).render().generated);
   const fixture = JSON.parse(await readFile(new URL("../../fixtures/capabilities/claude-tier1.json", import.meta.url), "utf8"));
 
   assert.deepEqual(fixture, claudeTier1CapabilityMatrix());
   assert.deepEqual(report.capabilities, claudeTier1CapabilityMatrix());
+  assert.deepEqual(report.capabilities.native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
 });

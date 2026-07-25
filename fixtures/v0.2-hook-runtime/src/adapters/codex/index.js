@@ -1,5 +1,4 @@
-import { auditInstalledRoles, validateContractForTarget } from "../../schema/index.js";
-import { resolveLaneModels } from "../../config/lanes.js";
+import { auditInstalledRoles, validateContract } from "../../schema/index.js";
 import { projectPolicy } from "../../policy/index.js";
 
 const CODEX_CAPABILITY_MATRIX = Object.freeze({
@@ -15,22 +14,30 @@ export function codexCapabilityMatrix() {
 }
 
 function assertValidContract(contract) {
-  const validation = validateContractForTarget(contract, "codex");
+  const validation = validateContract(contract);
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
 }
 
 export function resolveCodexRequestedRoutes(contract, runtimeDefaults) {
   assertValidContract(contract);
-  const lanes = resolveLaneModels(contract, "codex", runtimeDefaults);
+  const release = runtimeDefaults?.release;
+  const defaults = runtimeDefaults?.lanes;
+  const releaseValid = typeof release?.version === "string" && release.version.length > 0
+    && typeof release?.source === "string" && release.source.length > 0 && /^[a-f0-9]{64}$/.test(release?.hash ?? "");
   const routes = {};
-  for (const [role, configuration] of Object.entries(contract.roles ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
-    const lane = lanes[configuration.lane];
-    if (lane?.resolved !== true) throw new TypeError(`${lane?.reason === "UNSAFE_MODEL_TOKEN" ? "UNSAFE_MODEL_TOKEN" : "AMBIGUOUS_MODEL_RESOLUTION"}: ${role}`);
+  for (const [role, configuration] of Object.entries(contract.roles).sort(([left], [right]) => left.localeCompare(right))) {
+    const lane = contract.lanes[configuration.lane];
+    const binding = contract.targets?.codex?.lanes?.[configuration.lane];
+    const defaultBinding = defaults?.[lane.class];
+    const defaultValid = releaseValid && typeof defaultBinding?.model === "string" && defaultBinding.model.length > 0
+      && typeof defaultBinding.provenance === "string" && defaultBinding.provenance.length > 0;
+    const model = binding?.model ?? (defaultValid ? defaultBinding.model : undefined);
+    if (!model) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
     routes[role] = Object.freeze({
       lane: configuration.lane,
-      model: lane.model,
-      modelSource: lane.modelSource,
-      provenance: lane.provenance,
+      model,
+      modelSource: binding ? "target-binding" : "runtime-default",
+      provenance: binding?.provenance ?? defaultBinding?.provenance,
       reasoning: lane.reasoning,
     });
   }
@@ -47,7 +54,7 @@ export function createCodexTier1Adapter(contract, options) {
     supportsVersion: options.supportsVersion,
     render() {
       return Object.freeze({
-        policy: projectPolicy({ target: "codex", contract, runtimeDefaults: options.runtimeDefaults }),
+        policy: projectPolicy({ target: "codex", contract }),
         generated: `${JSON.stringify({
           adapter: "codex-omx",
           tier: "tier1",
@@ -62,8 +69,7 @@ export function createCodexTier1Adapter(contract, options) {
           }])),
           audit,
           capabilities: codexCapabilityMatrix(),
-          enforcement_scope: "none (guidance only)",
-          status: "guidance only",
+          status: "partial enforcement",
         }, null, 2)}\n`,
       });
     },
