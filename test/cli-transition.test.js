@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -38,7 +38,9 @@ async function withBothContracts(t) {
 }
 
 async function installPresent(context, target = "claude") {
-  assert.equal((await invoke(["install", "--global", "--target", target, "--contract", context.contractPath], { env: context.env })).code, 0);
+  const result = await invoke(["install", "--global", "--target", target, "--contract", context.contractPath], { env: context.env });
+  assert.equal(result.code, 0);
+  return result;
 }
 
 async function transitionAbsent(context, target = "claude") {
@@ -62,6 +64,22 @@ async function assertUnchanged(context, before) {
   assert.equal(await readFile(join(context.claudeHome, "settings.json"), "utf8"), before.settings);
   assert.deepEqual(await readdir(join(context.claudeHome, ".orbitlane", "contracts")), before.snapshots);
   assert.deepEqual(await readdir(join(context.claudeHome, ".orbitlane", "hook")), before.runtime);
+}
+
+async function guidanceFilesBefore(context) {
+  return Object.freeze({
+    instruction: await readFile(join(context.claudeHome, "CLAUDE.md"), "utf8"),
+    report: await readFile(join(context.claudeHome, ".orbitlane", "claude-report.json"), "utf8"),
+    snapshots: await readdir(join(context.claudeHome, ".orbitlane", "contracts")),
+  });
+}
+
+async function assertGuidanceUnchanged(context, before) {
+  assert.equal(await readFile(join(context.claudeHome, "CLAUDE.md"), "utf8"), before.instruction);
+  assert.equal(await readFile(join(context.claudeHome, ".orbitlane", "claude-report.json"), "utf8"), before.report);
+  assert.deepEqual(await readdir(join(context.claudeHome, ".orbitlane", "contracts")), before.snapshots);
+  await assert.rejects(readFile(join(context.claudeHome, "settings.json"), "utf8"));
+  await assert.rejects(readdir(join(context.claudeHome, ".orbitlane", "hook")));
 }
 
 test("present to absent removes only the exact owned Agent hook", async (t) => {
@@ -132,6 +150,27 @@ test("a legacy report transitions with its exact live command", async (t) => {
   assert.deepEqual(JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8")), {});
 });
 
+test("a malformed PreToolUse value is unowned for transition, direct installer, and uninstall", async (t) => {
+  const context = await withBothContracts(t);
+  await installPresent(context);
+  const report = await readFile(join(context.claudeHome, ".orbitlane", "claude-report.json"), "utf8");
+  const command = JSON.parse(report).receipt.guard_command;
+  const settingsPath = join(context.claudeHome, "settings.json");
+  await writeFile(settingsPath, `${JSON.stringify({ hooks: { PreToolUse: {} } })}\n`, "utf8");
+  const before = await filesBefore(context);
+  const transition = await transitionAbsent(context);
+  assert.notEqual(transition.code, 0);
+  assert.match(transition.stdout + transition.stderr, /RECEIPT_UNVERIFIABLE/);
+  await assertUnchanged(context, before);
+  const direct = await installRouting(ROLES_LESS, { target: "claude", adapters: { claude: await transitionAdapter(context, Object.freeze({ kind: "remove-owned-hook", command, reportHash: sha256(report) })) } });
+  assert.equal(direct.outcomes.claude.error.code, "RECEIPT_UNVERIFIABLE");
+  await assertUnchanged(context, before);
+  const uninstall = await invoke(["uninstall", "--global", "--target", "claude"], { env: context.env });
+  assert.notEqual(uninstall.code, 0);
+  assert.match(uninstall.stdout + uninstall.stderr, /RECEIPT_UNVERIFIABLE/);
+  await assertUnchanged(context, before);
+});
+
 test("a Claude transition failure under both preserves a successful Codex install", async (t) => {
   const context = await withBothContracts(t);
   await installPresent(context, "both");
@@ -140,6 +179,25 @@ test("a Claude transition failure under both preserves a successful Codex instal
   assert.equal(result.code, 1);
   assert.match(await readFile(join(context.codexHome, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/);
 });
+
+for (const [name, mutate, code] of [
+  ["unsupported modern schema", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.schema_version = 99; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "UNSUPPORTED_REPORT_SCHEMA"],
+  ["malformed modern pointer", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.contract_snapshot = {}; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "REPORT_POINTER_MALFORMED"],
+  ["missing modern snapshot", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.contract_snapshot.sha256 = "0".repeat(64); await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "SNAPSHOT_UNREADABLE"],
+  ["hash-mismatched modern snapshot", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); await writeFile(join(context.claudeHome, ".orbitlane", "contracts", `${report.contract_snapshot.sha256}.json`), "tampered\n", "utf8"); }, "SNAPSHOT_HASH_MISMATCH"],
+  ["malformed modern snapshot JSON", async (context) => { const bytes = "{not json\n"; const hash = sha256(bytes); const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.contract_snapshot.sha256 = hash; await mkdir(join(context.claudeHome, ".orbitlane", "contracts"), { recursive: true }); await writeFile(join(context.claudeHome, ".orbitlane", "contracts", `${hash}.json`), bytes, "utf8"); await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "SNAPSHOT_UNREADABLE"],
+]) {
+  test(`guidance to guard rejects ${name} before preparation`, async (t) => {
+    const context = await withBothContracts(t);
+    assert.equal((await transitionAbsent(context)).code, 0);
+    await mutate(context);
+    const before = await guidanceFilesBefore(context);
+    const result = await invoke(["install", "--global", "--target", "claude", "--contract", context.contractPath], { env: context.env });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stdout + result.stderr, new RegExp(code));
+    await assertGuidanceUnchanged(context, before);
+  });
+}
 
 async function transitionAdapter(context, action, failurePoint) {
   const adapter = createClaudeTier1Adapter(ROLES_LESS, {

@@ -9,6 +9,7 @@ import { createCodexTier1Adapter } from "../src/adapters/codex/index.js";
 import { resolveTargetPaths } from "../src/config/paths.js";
 import { planSnapshot, writeSnapshot } from "../src/config/snapshots.js";
 import { loadJsonSource } from "../src/config/source.js";
+import { resolveEffectiveContract } from "../src/guards/resolve-contract.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -101,14 +102,16 @@ function transitionFailure(code, path) {
 }
 
 function hasAgentHook(settings, command) {
-  return (settings?.hooks?.PreToolUse ?? [])
+  const entries = settings?.hooks?.PreToolUse;
+  if (!Array.isArray(entries)) return false;
+  return entries
     .filter((entry) => entry?.matcher === "Agent")
     .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
     .some((hook) => hook?.type === "command" && hook.command === command);
 }
 
 async function claudeTransitionAction(options, claudeGuardEnabled) {
-  if (options.command !== "install" || options.dryRun === true || claudeGuardEnabled || (options.target !== "claude" && options.target !== "both")) return undefined;
+  if (options.command !== "install" || (options.target !== "claude" && options.target !== "both")) return undefined;
   const resolved = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude;
   let content;
   try { content = await readFile(resolved.generatedPath, "utf8"); } catch (error) {
@@ -119,8 +122,18 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
   try { report = JSON.parse(content); } catch { throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath); }
   if (report === null || typeof report !== "object" || Array.isArray(report)) throw transitionFailure("REPORT_UNREADABLE", resolved.generatedPath);
   const receipt = report.receipt;
-  if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
   const legacy = receipt?.version === undefined;
+  if (!legacy) {
+    if (receipt?.version !== 1 || !["guidance-only", "claude-managed-role-guard"].includes(receipt.install_shape)
+      || (receipt.install_shape === "claude-managed-role-guard" && (typeof receipt.guard_command !== "string" || receipt.guard_command.length === 0))) {
+      throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
+    }
+    let effective;
+    try { effective = await resolveEffectiveContract({ cwd: resolved.root, claudeConfigDir: resolved.root }); } catch (error) { throw transitionFailure(error?.code ?? "REPORT_UNREADABLE", resolved.generatedPath); }
+    if (effective.reportPath !== resolved.generatedPath) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
+  }
+  if (claudeGuardEnabled) return undefined;
+  if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
   const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
   if (!legacy && (!report?.contract_snapshot || !digest.test(report.contract_snapshot.sha256 ?? ""))) throw transitionFailure("REPORT_POINTER_MISSING", resolved.generatedPath);
   if ((legacy && (typeof command !== "string" || command.length === 0))
@@ -167,10 +180,7 @@ async function receiptAdapters(options) {
       // matcher would report a successful uninstall while leaving the entry in place
       // and deleting the runtime it points at.
       const settings = await readJsonIfPossible(resolved.claude.settingsPath);
-      const installed = (settings?.hooks?.PreToolUse ?? [])
-        .filter((entry) => entry?.matcher === "Agent")
-        .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-        .some((hook) => hook?.type === "command" && hook.command === command);
+      const installed = hasAgentHook(settings, command);
       result.claude = shape === "claude-managed-role-guard" && typeof command === "string" && command.length > 0 && installed
         ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
         : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);

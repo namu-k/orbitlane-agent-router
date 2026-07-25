@@ -110,10 +110,18 @@ function previousGuardCommand(content) {
   try { report = JSON.parse(content); } catch {
     throw Object.assign(new Error("REPORT_UNREADABLE: the existing report could not be parsed"), { code: "REPORT_UNREADABLE" });
   }
-  if (report?.receipt?.version === 1) {
-    return report.receipt.install_shape === "claude-managed-role-guard" ? report.receipt.guard_command : undefined;
+  if (report === null || typeof report !== "object" || Array.isArray(report)) {
+    throw Object.assign(new Error("REPORT_UNREADABLE: the existing report is not an object"), { code: "REPORT_UNREADABLE" });
   }
-  if (report?.receipt?.version !== undefined) return undefined;
+  if (report.schema_version !== undefined && report.schema_version !== 2) {
+    throw Object.assign(new Error("UNSUPPORTED_REPORT_SCHEMA: the existing report has an unsupported schema"), { code: "UNSUPPORTED_REPORT_SCHEMA" });
+  }
+  if (report.receipt?.version !== undefined) {
+    if (report.receipt.version !== 1) throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: the existing receipt version is unsupported"), { code: "RECEIPT_UNVERIFIABLE" });
+    if (report.receipt.install_shape === "guidance-only") return undefined;
+    if (report.receipt.install_shape === "claude-managed-role-guard" && typeof report.receipt.guard_command === "string" && report.receipt.guard_command.length > 0) return report.receipt.guard_command;
+    throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: the existing receipt is malformed"), { code: "RECEIPT_UNVERIFIABLE" });
+  }
   return report?.settings_projection?.guard_command;
 }
 
@@ -122,7 +130,9 @@ function hasAgentHook(content, command) {
   try { settings = content.length === 0 ? {} : JSON.parse(content); } catch {
     throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: settings could not be parsed"), { code: "RECEIPT_UNVERIFIABLE" });
   }
-  return (settings?.hooks?.PreToolUse ?? [])
+  const entries = settings?.hooks?.PreToolUse;
+  if (!Array.isArray(entries)) return false;
+  return entries
     .filter((entry) => entry?.matcher === "Agent")
     .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
     .some((hook) => hook?.type === "command" && hook.command === command);
