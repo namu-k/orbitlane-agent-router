@@ -144,6 +144,9 @@ export function createClaudeTier1Adapter(contract, options) {
           native_artifacts: nativeArtifacts,
           settings_projection: settingsProjection,
           ...(options.spawnGuardCommand === undefined ? {} : { settings_projection: { ...settingsProjection, guard_command: options.spawnGuardCommand } }),
+          receipt: options.spawnGuardCommand === undefined
+            ? { version: 1, install_shape: "guidance-only" }
+            : { version: 1, install_shape: "claude-managed-role-guard", guard_command: options.spawnGuardCommand },
           audit,
           capabilities,
           enforcement_scope: hasRoles ? "scoped-request-check" : "none (roles omitted)",

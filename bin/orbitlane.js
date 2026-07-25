@@ -106,19 +106,34 @@ async function receiptAdapters(options) {
   if (selected.includes("codex")) result.codex = Object.freeze({ ...resolved.codex, spawnGuardCommand: false });
   if (selected.includes("claude")) {
     const report = await readJsonIfPossible(resolved.claude.generatedPath);
-    const command = report?.settings_projection?.guard_command;
     const settings = await readJsonIfPossible(resolved.claude.settingsPath);
-    // Ownership must be proven where removal actually happens. mergeSettings only
-    // strips hooks under the Agent matcher, so accepting the command under any
-    // matcher would report a successful uninstall while leaving the entry in place
-    // and deleting the runtime it points at.
-    const installed = (settings?.hooks?.PreToolUse ?? [])
-      .filter((entry) => entry?.matcher === "Agent")
-      .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-      .some((hook) => hook?.type === "command" && hook.command === command);
-    result.claude = typeof command === "string" && command.length > 0 && installed
-      ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
-      : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
+    const receipt = report?.receipt;
+    // Delete authority never rests on a capability description. Either a versioned
+    // receipt names the shape, or — for an install written before this receipt
+    // existed — the pre-0.3.0 guard_command proof applies. A report carrying neither
+    // proves nothing and must not touch settings.json.
+    const legacy = receipt?.version === undefined;
+    const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+    const shape = legacy
+      ? (typeof command === "string" && command.length > 0 ? "claude-managed-role-guard" : undefined)
+      : receipt?.version === 1 ? receipt.install_shape : undefined;
+
+    if (report !== undefined && shape === "guidance-only") {
+      // Nothing was ever written to settings.json, so there is nothing to prove or remove.
+      result.claude = Object.freeze({ ...resolved.claude, spawnGuardCommand: false });
+    } else {
+      // Ownership must be proven where removal actually happens. mergeSettings only
+      // strips hooks under the Agent matcher, so accepting the command under any
+      // matcher would report a successful uninstall while leaving the entry in place
+      // and deleting the runtime it points at.
+      const installed = (settings?.hooks?.PreToolUse ?? [])
+        .filter((entry) => entry?.matcher === "Agent")
+        .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+        .some((hook) => hook?.type === "command" && hook.command === command);
+      result.claude = shape === "claude-managed-role-guard" && typeof command === "string" && command.length > 0 && installed
+        ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
+        : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
+    }
   }
   return Object.freeze(result);
 }

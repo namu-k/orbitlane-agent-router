@@ -86,3 +86,54 @@ test("a guard command recorded under a different matcher is not treated as owned
   assert.equal(JSON.parse(await readFile(settingsPath, "utf8")).hooks.PreToolUse[0].hooks.length, 1);
   assert.ok((await readdir(join(claudeHome, ".orbitlane", "hook"))).length > 0, "the runtime must survive a refused uninstall");
 });
+
+test("a legacy 0.2.0 receipt without a version still proves ownership", async (t) => {
+  const { contractPath, claudeHome, env } = await isolated(t);
+  await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env });
+
+  const reportPath = join(claudeHome, ".orbitlane", "claude-report.json");
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  delete report.receipt;
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+
+  const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")), {});
+});
+
+test("a guidance-only receipt uninstalls without touching settings", async (t) => {
+  const { contractPath, claudeHome, env } = await isolated(t);
+  await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env });
+
+  const reportPath = join(claudeHome, ".orbitlane", "claude-report.json");
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.receipt = { version: 1, install_shape: "guidance-only" };
+  delete report.settings_projection.guard_command;
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  const foreign = { hooks: { PreToolUse: [{ matcher: "Agent", hooks: [{ type: "command", command: "third-party" }] }] } };
+  await writeFile(join(claudeHome, "settings.json"), `${JSON.stringify(foreign, null, 2)}\n`, "utf8");
+
+  const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")), foreign);
+});
+
+test("a report with neither a receipt nor a guard command refuses to touch an existing hook", async (t) => {
+  const { contractPath, claudeHome, env } = await isolated(t);
+  await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env });
+
+  const reportPath = join(claudeHome, ".orbitlane", "claude-report.json");
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  delete report.receipt;
+  delete report.settings_projection.guard_command;
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  const before = await readFile(join(claudeHome, "settings.json"), "utf8");
+
+  const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout + result.stderr, /RECEIPT_UNVERIFIABLE/);
+  assert.equal(await readFile(join(claudeHome, "settings.json"), "utf8"), before);
+});
