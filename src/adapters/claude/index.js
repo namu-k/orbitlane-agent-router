@@ -128,7 +128,7 @@ export function createClaudeTier1Adapter(contract, options) {
     supportsVersion: options.supportsVersion,
     render() {
       return Object.freeze({
-        policy: projectPolicy({ target: "claude", contract }),
+        policy: projectPolicy({ target: "claude", contract, runtimeDefaults: options.runtimeDefaults }),
         settingsProjection: options.spawnGuardCommand === undefined ? undefined : Object.freeze({ command: options.spawnGuardCommand }),
         generated: `${JSON.stringify({
           adapter: "claude-code",

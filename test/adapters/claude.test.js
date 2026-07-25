@@ -94,7 +94,7 @@ test("projects stable Claude subagents and an honest Tier 1 report without trans
   const rendered = adapter.render();
   const generated = JSON.parse(rendered.generated);
 
-  assert.match(rendered.policy, /OrbitLane policy projection for claude/);
+  assert.match(rendered.policy, /execution -> claude-terra, bounded lookup -> claude-luna, delegated verification and analysis -> claude-sol\./);
   assert.equal(generated.tier, "tier1");
   assert.equal(generated.configuration_enforced, false);
   assert.equal(generated.semantic_policy_audited, true);

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const cli = fileURLToPath(new URL("../bin/orbitlane.js", import.meta.url));
-const contract = { contract_version: "1.0.0", lanes: { sol: { class: "judgment", reasoning: "high" }, terra: { class: "implementation", reasoning: "medium" }, luna: { class: "bounded-retrieval", reasoning: "low" } }, roles: { executor: { lane: "terra", provenance: "user-approved" } }, targets: { codex: { lanes: { terra: { model: "codex-terra", provenance: "fixture" } } }, claude: { lanes: { terra: { model: "claude-terra", provenance: "fixture" } } } } };
+const contract = { contract_version: "1.0.0", lanes: { sol: { class: "judgment", reasoning: "high" }, terra: { class: "implementation", reasoning: "medium" }, luna: { class: "bounded-retrieval", reasoning: "low" } }, roles: { executor: { lane: "terra", provenance: "user-approved" } }, targets: { codex: { lanes: { sol: { model: "codex-sol", provenance: "fixture" }, terra: { model: "codex-terra", provenance: "fixture" }, luna: { model: "codex-luna", provenance: "fixture" } } }, claude: { lanes: { sol: { model: "claude-sol", provenance: "fixture" }, terra: { model: "claude-terra", provenance: "fixture" }, luna: { model: "claude-luna", provenance: "fixture" } } } } };
 
 export async function isolated(t) {
   const directory = await mkdtemp(join(tmpdir(), "orbitlane-global-"));

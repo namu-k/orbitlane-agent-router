@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assertCatalogCompatible, stableRoleCatalog } from "../../src/catalog/index.js";
-import { delegationDecisionFixtures, projectMarkerBoundedPolicy, projectPolicy } from "../../src/policy/index.js";
+import { markerBoundedPolicy, projectMarkerBoundedPolicy, projectPolicy } from "../../src/policy/index.js";
 
 const contract = Object.freeze({
   contract_version: "1.0.0",
@@ -16,71 +15,83 @@ const contract = Object.freeze({
     executor: { lane: "terra", provenance: "user-approved" },
     explore: { lane: "luna", provenance: "user-approved" },
   },
+  targets: {
+    claude: {
+      lanes: {
+        sol: { model: "opus", provenance: "user-local" },
+        terra: { model: "sonnet", provenance: "user-local" },
+        luna: { model: "haiku", provenance: "user-local" },
+      },
+    },
+    codex: {
+      lanes: {
+        sol: { model: "gpt-5.6-sol", provenance: "user-local" },
+        terra: { model: "gpt-5.6-terra", provenance: "user-local" },
+        luna: { model: "gpt-5.6-luna", provenance: "user-local" },
+      },
+    },
+  },
 });
 
-test("publishes the portable core catalog with the canonical lane mapping", () => {
-  assert.deepEqual(stableRoleCatalog(), {
-    architect: { access: "read-only", lane: "sol", responsibility: "architecture and consequential judgment" },
-    critic: { access: "read-only", lane: "sol", responsibility: "adversarial review of plans and judgments" },
-    executor: { access: "write-and-test", lane: "terra", responsibility: "implementation, fixes, and bounded refactors" },
-    "team-executor": { access: "write-and-test", lane: "terra", responsibility: "approved team execution" },
-    verifier: { access: "read-and-test", lane: "terra", responsibility: "independent verification and evidence" },
-    "test-engineer": { access: "write-and-test", lane: "terra", responsibility: "test design, fixtures, and regression verification" },
-    explore: { access: "read-only", lane: "luna", responsibility: "bounded repository lookup" },
-  });
+test("the kernel is four lines carrying this target's model binding", () => {
+  const policy = projectPolicy({ target: "claude", contract });
+  const lines = policy.trimEnd().split("\n");
+
+  assert.equal(lines.length, 4);
+  assert.match(lines[0], /^- Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete\.$/);
+  assert.match(lines[1], /^- Keep judgment that needs full context, discipline, or confidentiality in the main session\./);
+  assert.equal(lines[2], "- When delegating, use: execution -> sonnet, bounded lookup -> haiku, delegated verification and analysis -> opus.");
+  assert.equal(lines[3], "- Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.");
 });
 
-test("rejects a contract that remaps a stable catalog role to another canonical lane", () => {
+test("each target advertises its own models", () => {
+  assert.match(projectPolicy({ target: "codex", contract }), /execution -> gpt-5\.6-terra, bounded lookup -> gpt-5\.6-luna, delegated verification and analysis -> gpt-5\.6-sol\./);
+});
+
+test("role names never appear in the projection", () => {
+  for (const target of ["claude", "codex"]) {
+    const policy = projectPolicy({ target, contract });
+    for (const role of Object.keys(contract.roles)) {
+      assert.doesNotMatch(policy, new RegExp(role), `${role} leaked into the ${target} projection`);
+    }
+    assert.doesNotMatch(policy, /Contract routes:/);
+  }
+});
+
+test("the projection carries no target-inappropriate model", () => {
+  assert.doesNotMatch(projectPolicy({ target: "claude", contract }), /gpt-5\.6/);
+  assert.doesNotMatch(projectPolicy({ target: "codex", contract }), /sonnet|opus|haiku/);
+});
+
+test("a contract with no roles still projects", () => {
+  const rolesLess = structuredClone(contract);
+  delete rolesLess.roles;
+
+  assert.match(projectPolicy({ target: "claude", contract: rolesLess }), /execution -> sonnet/);
+});
+
+test("an unresolvable lane fails loudly and names the lane", () => {
+  const partial = structuredClone(contract);
+  delete partial.targets.claude.lanes.luna;
+
   assert.throws(
-    () => assertCatalogCompatible({ ...contract, roles: { ...contract.roles, executor: { lane: "sol", provenance: "user-approved" } } }),
-    { message: "STABLE_ROLE_CATALOG_MISMATCH: executor must use terra" },
+    () => projectPolicy({ target: "claude", contract: partial }),
+    (error) => /^AMBIGUOUS_MODEL_RESOLUTION: luna/.test(error.message),
   );
 });
 
-test("projects a deterministic marker policy rather than a runtime router", () => {
-  const policy = projectPolicy({ target: "codex", contract });
-
-  assert.match(policy, /Policy projection only; it is not runtime router code\./);
-  assert.match(policy, /Precedence: system, safety, filesystem, and authority constraints; explicit user prohibitions and topology; explicit skill activation; workflow request; direct-first gate; role to lane to model mapping; runtime capability and evidence boundary\./);
-  assert.match(policy, /Resolver order after higher constraints: explicit user role, lane, model, or topology; explicit skill activation; workflow request; plan metadata; deterministic task shape; leader judgment\./);
-  assert.match(policy, /Contract routes: architect=sol, executor=terra, explore=luna\./);
-  assert.match(policy, /Direct-first: keep work direct unless a bounded delegation benefit is demonstrated\./);
-  assert.match(policy, /Plan size alone never creates an agent instance\./);
-  assert.match(policy, /Coupled multi-phase work keeps one persistent primary owner\./);
-  assert.match(policy, /Role profiles are stable; agent instances are created on demand only\./);
-  assert.match(policy, /Resolver order after higher constraints: explicit user role, lane, model, or topology; explicit skill activation; workflow request; plan metadata; deterministic task shape; leader judgment\./);
-  assert.match(policy, /\$executing-plans defines workflow checkpoints and does not automatically create a fresh agent for each task\./);
-  assert.match(policy, /Only an explicit subagent workflow opts into a subagent topology\./);
-  assert.match(policy, /A skill name in prose is not skill activation\./);
-  assert.match(policy, /Resume the existing bounded delegate for follow-up work rather than creating a fresh instance\./);
-  assert.match(policy, /Overlapping write scope under an explicit subagent workflow is ROUTE_CONFLICT\./);
-  assert.match(policy, /Full transcript or fork context is explicit opt-in only\./);
-  assert.match(policy, /Reject an unknown routed role or ambiguous model resolution; never silently fall back\./);
-  assert.match(policy, /Report installed roles outside the contract as unmanaged; do not block installation unless strict mode is requested\./);
+test("the projection stays inside the target marker boundary", () => {
+  assert.match(
+    projectMarkerBoundedPolicy({ target: "codex", contract }),
+    /^<!-- ORBITLANE:START codex -->\n[\s\S]*<!-- ORBITLANE:END codex -->\n$/,
+  );
 });
 
-test("projects policy inside the target marker boundary", () => {
-  assert.match(projectMarkerBoundedPolicy({ target: "codex", contract }), /^<!-- ORBITLANE:START codex -->\n[\s\S]*<!-- ORBITLANE:END codex -->\n$/);
+test("markerBoundedPolicy still wraps arbitrary policy text", () => {
+  assert.equal(markerBoundedPolicy("claude", "body\n"), "<!-- ORBITLANE:START claude -->\nbody\n<!-- ORBITLANE:END claude -->\n");
 });
 
-test("golden delegation fixtures bind every expectation to projected policy text", () => {
-  const policy = projectPolicy({ target: "claude", contract });
-  assert.deepEqual(delegationDecisionFixtures().map((fixture) => fixture.policyText), [
-    "A short single-file change stays direct.",
-    "A consequential judgment depending on a long conversation stays direct.",
-    "Sequential phases sharing state use a persistent primary owner.",
-    "Independent platform investigations may use bounded delegates only after the direct-first gate passes.",
-    "Follow-up for the same child task resumes the existing bounded delegate.",
-    "An explicit full-context request selects full-context.",
-    "A skill name appearing only in prose is not activated.",
-    "With $executing-plans and a coupled plan, use a persistent executor.",
-    "With $executing-plans and independent tasks, delegate only tasks that pass the gate.",
-    "With $subagent-driven-development and independent tasks, explicit delegation is allowed.",
-    "With $subagent-driven-development and overlapping write scope, record ROUTE_CONFLICT.",
-  ]);
-  for (const fixture of delegationDecisionFixtures()) {
-    assert.equal(typeof fixture.scenario, "string");
-    assert.equal(typeof fixture.expected, "string");
-    assert.ok(policy.includes(fixture.policyText), `${fixture.scenario} must be represented in the projection`);
-  }
+test("an invalid contract is rejected before anything is projected", () => {
+  assert.throws(() => projectPolicy({ target: "claude", contract: { contract_version: "1.0.0" } }), /INVALID_CONTRACT/);
+  assert.throws(() => projectPolicy({ target: "opencode", contract }), /target must be codex or claude/);
 });

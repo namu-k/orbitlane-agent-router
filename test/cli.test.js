@@ -19,8 +19,8 @@ const contract = {
   },
   roles: { executor: { lane: "terra", provenance: "user-approved" } },
   targets: {
-    codex: { lanes: { terra: { model: "codex-terra", provenance: "fixture" } } },
-    claude: { lanes: { terra: { model: "claude-terra", provenance: "fixture" } } },
+    codex: { lanes: { sol: { model: "codex-sol", provenance: "fixture" }, terra: { model: "codex-terra", provenance: "fixture" }, luna: { model: "codex-luna", provenance: "fixture" } } },
+    claude: { lanes: { sol: { model: "claude-sol", provenance: "fixture" }, terra: { model: "claude-terra", provenance: "fixture" }, luna: { model: "claude-luna", provenance: "fixture" } } },
   },
 };
 

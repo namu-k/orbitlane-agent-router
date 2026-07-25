@@ -34,7 +34,7 @@ test("emits a Tier 1 report with separate requested receipts and unproven native
   const rendered = adapter.render();
   const generated = JSON.parse(rendered.generated);
 
-  assert.match(rendered.policy, /OrbitLane policy projection for codex/);
+  assert.match(rendered.policy, /execution -> codex-terra, bounded lookup -> codex-luna, delegated verification and analysis -> codex-sol\./);
   assert.equal(generated.tier, "tier1");
   assert.equal(generated.configuration_enforced, false);
   assert.equal(generated.semantic_policy_audited, true);

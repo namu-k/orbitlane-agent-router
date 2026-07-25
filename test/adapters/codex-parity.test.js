@@ -6,7 +6,7 @@ import { codexCapabilityMatrix, createCodexTier1Adapter } from "../../src/adapte
 
 test("Codex generated report capabilities match the fixture-backed capability matrix", async () => {
   const contract = { contract_version: "1.0.0", lanes: { sol: { class: "judgment", reasoning: "high" }, terra: { class: "implementation", reasoning: "medium" }, luna: { class: "bounded-retrieval", reasoning: "low" } }, roles: { executor: { lane: "terra", provenance: "user-approved" } } };
-  const options = { instructionPath: "/tmp/a", generatedPath: "/tmp/b", runtime: { available: true, version: "1" }, supportsVersion: () => true, runtimeDefaults: { release: { version: "1", source: "official", hash: "a".repeat(64) }, lanes: { implementation: { model: "codex-terra", provenance: "official-default" } } } };
+  const options = { instructionPath: "/tmp/a", generatedPath: "/tmp/b", runtime: { available: true, version: "1" }, supportsVersion: () => true, runtimeDefaults: { release: { version: "1", source: "official", hash: "a".repeat(64) }, lanes: { judgment: { model: "codex-sol", provenance: "official-default" }, implementation: { model: "codex-terra", provenance: "official-default" }, "bounded-retrieval": { model: "codex-luna", provenance: "official-default" } } } };
   const report = JSON.parse(createCodexTier1Adapter(contract, options).render().generated);
   const fixture = JSON.parse(await readFile(new URL("../../fixtures/capabilities/codex.json", import.meta.url), "utf8"));
   assert.deepEqual(fixture, codexCapabilityMatrix());

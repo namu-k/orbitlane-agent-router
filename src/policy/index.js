@@ -1,56 +1,45 @@
 import { assertCatalogCompatible } from "../catalog/index.js";
+import { resolveLaneModels } from "../config/lanes.js";
 import { validateContract } from "../schema/index.js";
 
-const POLICY_LINES = Object.freeze([
-  "OrbitLane policy projection for {target}.",
-  "Policy projection only; it is not runtime router code.",
-  "Precedence: system, safety, filesystem, and authority constraints; explicit user prohibitions and topology; explicit skill activation; workflow request; direct-first gate; role to lane to model mapping; runtime capability and evidence boundary.",
-  "Direct-first: keep work direct unless a bounded delegation benefit is demonstrated.",
-  "Plan size alone never creates an agent instance.",
-  "Coupled multi-phase work keeps one persistent primary owner.",
-  "Role profiles are stable; agent instances are created on demand only.",
-  "Resolver order after higher constraints: explicit user role, lane, model, or topology; explicit skill activation; workflow request; plan metadata; deterministic task shape; leader judgment.",
-  "$executing-plans defines workflow checkpoints and does not automatically create a fresh agent for each task.",
-  "Only an explicit subagent workflow opts into a subagent topology.",
-  "A skill name in prose is not skill activation.",
-  "Resume the existing bounded delegate for follow-up work rather than creating a fresh instance.",
-  "Overlapping write scope under an explicit subagent workflow is ROUTE_CONFLICT.",
-  "Full transcript or fork context is explicit opt-in only.",
-  "Reject an unknown routed role or ambiguous model resolution; never silently fall back.",
-  "Report installed roles outside the contract as unmanaged; do not block installation unless strict mode is requested.",
+// The projected kernel. Four lines: a delegation nudge, the main-session boundary
+// (which also carries escalation), this target's tier->model binding, and the one
+// conflict rule kept from the old policy block. Everything else the old projection
+// said is either the runtime's own job or the agent's judgment.
+const KERNEL = Object.freeze([
+  "- Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete.",
+  "- Keep judgment that needs full context, discipline, or confidentiality in the main session. A delegate that meets a new consequential judgment outside its assigned scope stops and asks the main session to decide.",
+  "- When delegating, use: execution -> {terra}, bounded lookup -> {luna}, delegated verification and analysis -> {sol}.",
+  "- Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.",
 ]);
 
-const DELEGATION_DECISION_FIXTURES = Object.freeze([
-  Object.freeze({ scenario: "short single-file change", expected: "direct", policyText: "A short single-file change stays direct." }),
-  Object.freeze({ scenario: "consequential judgment depending on a long conversation", expected: "direct", policyText: "A consequential judgment depending on a long conversation stays direct." }),
-  Object.freeze({ scenario: "sequential phases sharing state", expected: "persistent-owner", policyText: "Sequential phases sharing state use a persistent primary owner." }),
-  Object.freeze({ scenario: "three independent platform investigations", expected: "bounded-delegate", policyText: "Independent platform investigations may use bounded delegates only after the direct-first gate passes." }),
-  Object.freeze({ scenario: "follow-up for the same child task", expected: "resume-delegate", policyText: "Follow-up for the same child task resumes the existing bounded delegate." }),
-  Object.freeze({ scenario: "user explicitly requests full context", expected: "full-context", policyText: "An explicit full-context request selects full-context." }),
-  Object.freeze({ scenario: "skill name appears only in prose", expected: "skill-not-activated", policyText: "A skill name appearing only in prose is not activated." }),
-  Object.freeze({ scenario: "$executing-plans with a coupled plan", expected: "persistent executor", policyText: "With $executing-plans and a coupled plan, use a persistent executor." }),
-  Object.freeze({ scenario: "$executing-plans with independent tasks", expected: "only gate-approved tasks delegate", policyText: "With $executing-plans and independent tasks, delegate only tasks that pass the gate." }),
-  Object.freeze({ scenario: "$subagent-driven-development with independent tasks", expected: "explicit delegation allowed", policyText: "With $subagent-driven-development and independent tasks, explicit delegation is allowed." }),
-  Object.freeze({ scenario: "$subagent-driven-development with overlapping write scope", expected: "ROUTE_CONFLICT", policyText: "With $subagent-driven-development and overlapping write scope, record ROUTE_CONFLICT." }),
-]);
+const KERNEL_LANES = Object.freeze(["sol", "terra", "luna"]);
 
-export function projectPolicy({ target, contract }) {
+export function projectPolicy({ target, contract, runtimeDefaults }) {
   if (target !== "codex" && target !== "claude") throw new TypeError("target must be codex or claude");
   const validation = validateContract(contract);
   if (!validation.valid) throw new TypeError(`INVALID_CONTRACT: ${validation.errors.join(", ")}`);
+  // Kept even though the kernel no longer reads roles: a contract that remaps a
+  // stable-catalog role to the wrong lane must still be caught here.
   assertCatalogCompatible(contract);
-  const routes = Object.entries(contract.roles).sort(([left], [right]) => left.localeCompare(right)).map(([role, config]) => `${role}=${config.lane}`).join(", ");
-  return `${POLICY_LINES.map((line) => line.replace("{target}", target)).join("\n")}\n${DELEGATION_DECISION_FIXTURES.map((fixture) => fixture.policyText).join("\n")}\nContract routes: ${routes}.\n`;
+
+  const lanes = resolveLaneModels(contract, target, runtimeDefaults);
+  // The kernel embeds all three model names, so an unresolved lane has no honest
+  // rendering. Fail rather than emit a placeholder or drop the line.
+  for (const laneId of KERNEL_LANES) {
+    if (lanes[laneId]?.resolved !== true) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${laneId} for target ${target}`);
+  }
+
+  const body = KERNEL
+    .map((line) => KERNEL_LANES.reduce((text, laneId) => text.replaceAll(`{${laneId}}`, lanes[laneId].model), line))
+    .join("\n");
+  return `${body}\n`;
 }
 
 export function markerBoundedPolicy(target, policy) {
   return `<!-- ORBITLANE:START ${target} -->\n${policy}<!-- ORBITLANE:END ${target} -->\n`;
 }
 
-export function projectMarkerBoundedPolicy({ target, contract }) {
-  return markerBoundedPolicy(target, projectPolicy({ target, contract }));
-}
-
-export function delegationDecisionFixtures() {
-  return structuredClone(DELEGATION_DECISION_FIXTURES);
+export function projectMarkerBoundedPolicy({ target, contract, runtimeDefaults }) {
+  return markerBoundedPolicy(target, projectPolicy({ target, contract, runtimeDefaults }));
 }

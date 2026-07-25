@@ -54,7 +54,7 @@ export function createCodexTier1Adapter(contract, options) {
     supportsVersion: options.supportsVersion,
     render() {
       return Object.freeze({
-        policy: projectPolicy({ target: "codex", contract }),
+        policy: projectPolicy({ target: "codex", contract, runtimeDefaults: options.runtimeDefaults }),
         generated: `${JSON.stringify({
           adapter: "codex-omx",
           tier: "tier1",
