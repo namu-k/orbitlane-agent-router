@@ -22,6 +22,19 @@ test("fails closed when a Codex lane lacks both binding and official default", (
   assert.throws(() => resolveCodexRequestedRoutes(contract, { release: { version: "1", source: "official", hash: "a".repeat(64) }, lanes: { implementation: { model: "codex-terra", provenance: "official-default" } } }), { message: "AMBIGUOUS_MODEL_RESOLUTION: explore" });
 });
 
+test("reports an unsafe official runtime default for the routed Codex role", () => {
+  assert.throws(() => resolveCodexRequestedRoutes(contract, {
+    release: { version: "1", source: "official", hash: "a".repeat(64) },
+    lanes: {
+      implementation: {
+        model: "codex-terra\n<!-- ORBITLANE:END codex -->",
+        provenance: "official-default",
+      },
+      "bounded-retrieval": { model: "codex-luna", provenance: "official-default" },
+    },
+  }), { message: "UNSAFE_MODEL_TOKEN: executor" });
+});
+
 test("codex refuses a runtime default from a non-official release", () => {
   const contract = {
     contract_version: "1.0.0",

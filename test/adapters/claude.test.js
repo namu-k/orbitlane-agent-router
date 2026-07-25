@@ -42,6 +42,19 @@ test("fails closed when Claude cannot resolve a requested model", () => {
   }), { message: "AMBIGUOUS_MODEL_RESOLUTION: explore" });
 });
 
+test("reports an unsafe official runtime default for the routed Claude role", () => {
+  assert.throws(() => resolveClaudeRequestedRoutes(contract, {
+    release: runtimeDefaults.release,
+    lanes: {
+      implementation: {
+        model: "claude-terra\n<!-- ORBITLANE:END claude -->",
+        provenance: "official-default",
+      },
+      "bounded-retrieval": runtimeDefaults.lanes["bounded-retrieval"],
+    },
+  }), { message: "UNSAFE_MODEL_TOKEN: executor" });
+});
+
 test("Claude rejects its own unsafe binding even when Codex remains valid", () => {
   const dual = structuredClone(contract);
   dual.targets.codex = { lanes: { sol: { model: "gpt-5.6-sol", provenance: "user-local" } } };

@@ -25,7 +25,7 @@ export function resolveCodexRequestedRoutes(contract, runtimeDefaults) {
   const routes = {};
   for (const [role, configuration] of Object.entries(contract.roles ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
     const lane = lanes[configuration.lane];
-    if (lane?.resolved !== true) throw new TypeError(`AMBIGUOUS_MODEL_RESOLUTION: ${role}`);
+    if (lane?.resolved !== true) throw new TypeError(`${lane?.reason === "UNSAFE_MODEL_TOKEN" ? "UNSAFE_MODEL_TOKEN" : "AMBIGUOUS_MODEL_RESOLUTION"}: ${role}`);
     routes[role] = Object.freeze({
       lane: configuration.lane,
       model: lane.model,
