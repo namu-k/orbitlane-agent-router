@@ -2,11 +2,11 @@
 
 [English](README.md)
 
-> **상태: v0.2.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
+> **상태: v0.3.0이 npm에 공개되었습니다.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
 >
-> **v0.1.0에서 올라올 때는 재설치가 필요합니다.** report schema와 guard 인자 계약이 함께 바뀌었고, 패키지 업그레이드만으로는 이미 설치된 것이 갱신되지 않습니다. 재설치하기 전까지 해당 scope의 guard는 모든 Agent spawn을 거부하며, 어느 레이어를 재설치해야 하는지 오류에 명시합니다. [CHANGELOG.md](CHANGELOG.md) 참고.
+> **v0.2.0에서 올라올 때 재설치는 권장 사항이며 필수는 아닙니다.** 기존 guard는 계속 올바르게 동작합니다. 새 projection instruction block이 필요할 때 각 scope를 재설치하세요. [CHANGELOG.md](CHANGELOG.md) 참고.
 
-OrbitLane은 하나의 역할-모델 라우팅 계약을 Codex/OMX와 Claude Code의 네이티브 설정으로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 계약 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 Claude Code에 한정된 spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
+OrbitLane은 하나의 라우팅 contract를 Codex/OMX와 Claude Code의 네이티브 guidance로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 contract 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 roles를 선언한 contract에만 적용되는 Claude Code scoped spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 
 OrbitLane은 LLM API 트래픽을 중계하지 않습니다. 아키텍처, 구현, 검증, 저장소 조회 같은 **에이전트 역할과 작업 분류**를 사용자가 선택한 모델 lane에 연결합니다.
 
@@ -20,7 +20,7 @@ OrbitLane은 라우팅 정책을 명시적이고 이식 가능하게 만듭니�
 - 이름 있는 역할과 작업 형태를 lane에 연결합니다.
 - Codex, Claude Code 또는 둘 다 필요한 adapter만 설치합니다.
 - marker 기반 병합으로 사용자가 작성한 내용을 보존합니다.
-- 분류되지 않은 역할을 임의 모델에 배정하지 않고 거부합니다.
+- roles를 선언한 경우에만 분류되지 않은 역할을 임의 모델에 배정하지 않고 거부합니다.
 - configuration 적용과 runtime enforcement를 분리해 감사합니다.
 - 지원되지 않는 capability는 성공으로 가장하지 않고 `false` 또는 `unproven`으로 보고합니다.
 
@@ -69,14 +69,21 @@ OrbitLane은 두 레이어로 설치한다. 두 런타임 모두 전역과 프�
 
 ### install이 기록하는 것
 
-Claude target을 설치하면 guard runtime을 그것이 읽을 report 옆인
-`<config root>/.orbitlane/hook/`으로 복사하고, hook이 그 사본을 가리키게 한다.
-따라서 설치한 패키지가 사라진 뒤에도 guard는 계속 판정한다. 이는 `npx`와 `dlx`의
-정상적인 최종 상태다. `npx orbitlane install`은 모든 target과 두 레이어 모두에서
-지원한다.
+모든 target은 네 줄의 instruction block을 **guidance**로 받습니다. 이 block은 해당
+target의 tier-to-model binding을 담지만 enforcement는 아닙니다. Codex는 guidance만
+설치합니다. guard가 없으며 `effective_model`은 `unproven`으로 보고합니다.
 
-Claude target을 uninstall하면 그 사본과 snapshot 저장소를 함께 회수한다.
-heartbeat 로그는 증거이므로 남긴다.
+**Opt-in enforcement**는 contract가 `roles`를 선언할 때만 적용됩니다. 그때만 Claude
+target이 guard runtime을 그것이 읽을 report 옆인 `<config root>/.orbitlane/hook/`으로
+복사하고 `settings.json`에 scoped hook을 추가합니다. 이 guard는 request-consistency
+check이지 실제 실행 model의 보장이 아니며, `effective_model`은 계속 `unproven`입니다.
+`roles`가 없는 contract는 guidance만 설치합니다. `settings.json` hook도 vendored guard
+runtime도 만들지 않습니다. 설치한 package가 사라진 뒤에도 Claude guard는 계속 판정하며,
+이는 `npx`와 `dlx`의 정상적인 최종 상태입니다. `npx orbitlane install`은 모든 target과
+두 레이어 모두에서 지원합니다.
+
+roles를 선언한 Claude 설치를 uninstall하면 그 사본과 snapshot 저장소를 함께
+회수합니다. heartbeat 로그는 증거이므로 남깁니다.
 
 ## 코딩 에이전트 모델 라우팅의 작동 방식
 
@@ -116,7 +123,16 @@ OrbitLane은 workflow 문장에 특정 vendor의 현재 model 이름을 고정�
 }
 ```
 
-Lane은 canonical id(`sol` / `terra` / `luna`)와 `class`(judgment / implementation / bounded-retrieval) 두 층으로 표현하며, 공개 예시에는 provider model 이름을 고정하지 않습니다. Adapter는 각 lane을 contract의 선택적 per-target binding, 없으면 runtime의 공식 default(lane class 기준)로 해석하고 그 근거를 기록하며, 모호하면 추측하지 않고 실패합니다. Contract가 라우팅하는 역할은 provenance로 분류할 때까지(또는 `--strict`에서) 검증에 실패하고, 라우팅하지 않는 installed role은 `unmanaged`로 보고하며 건드리지 않습니다.
+Lane은 canonical id(`sol` / `terra` / `luna`)와 `class`(judgment / implementation / bounded-retrieval) 두 층으로 표현합니다. Adapter는 각 lane을 contract의 선택적 per-target binding, 없으면 runtime의 공식 default(lane class 기준)로 해석하고 그 근거를 기록하며, 모호하면 추측하지 않고 실패합니다. `roles`는 선택 사항입니다. 있을 때에는 각 routed role에 provenance가 필요하며, `roles`를 생략하면 의도적으로 guidance-only 설치를 선택합니다.
+
+`sonnet`, `haiku`, `opus`에 binding된 Claude target의 설치 kernel은 정확히 다음 네 개의 영어 줄입니다.
+
+```text
+- Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete.
+- Keep judgment that needs full context, discipline, or confidentiality in the main session. A delegate that meets a new consequential judgment outside its assigned scope stops and asks the main session to decide.
+- When delegating, use: execution -> sonnet, bounded lookup -> haiku, delegated verification and analysis -> opus.
+- Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.
+```
 
 ## Enforcement tier
 
@@ -134,7 +150,7 @@ OrbitLane은 유용한 라우팅과 runtime 증거가 필요한 주장을 분리
 
 Tier 1은 정상적이고 유용한 운영 모드입니다. 지원되는 native configuration을 결정적이고 감사 가능하게 만듭니다. 다만 모든 runtime 경로가 요청된 model을 사용했다고 주장하지 않습니다.
 
-v1 Claude Code adapter는 여기에 더해 Agent tool 호출에 대한 **scoped** pre-dispatch 검사(불일치 시 deny)를 강제합니다. 이는 별도 tier가 아니라 Tier 1 내부의 한정된 capability(`claude_agent_pre_dispatch`)로 보고되며, 모든 spawn path를 포함한다고 주장하지 않습니다.
+contract가 roles를 선언하면 v1 Claude Code adapter는 Agent tool 호출에 대한 **scoped** request-consistency check(불일치 시 deny)를 추가로 강제합니다. 이는 별도 tier가 아니라 Tier 1 내부의 한정된 capability(`claude_agent_pre_dispatch`)로 보고되며, 실제 실행 model의 보장도 아니고 모든 spawn path를 포함한다는 주장도 아닙니다.
 
 Tier 2는 대상 runtime이 다음 세 capability를 모두 증명할 때만 선택합니다.
 
@@ -172,20 +188,16 @@ OrbitLane은 이를 보완하는 접근입니다. Vendor-neutral routing contrac
 
 ## Codex와 Claude adapter 설계
 
-Codex/OMX adapter는 다음을 projection할 예정입니다.
+Codex/OMX adapter는 다음을 projection합니다.
 
-- 역할별 model과 reasoning mapping.
-- `AGENTS.md` 내부의 작은 marker 기반 policy block.
-- 지원되는 generated model table과 native configuration.
-- Capability 및 tier 판정 증거.
-- 실제 runtime binding을 주장하지 않는 static verification.
+- `AGENTS.md` 내부의 네 줄 marker 기반 guidance block.
+- effective runtime binding을 주장하지 않는 guidance-only status와 static audit evidence.
 
-Claude Code adapter는 다음을 projection할 예정입니다.
+Claude Code adapter는 다음을 projection합니다.
 
-- `CLAUDE.md` 내부의 작은 marker 기반 policy block.
-- Native `model`과 effort 설정이 포함된 custom subagent 정의.
-- 기존 내용을 보존하는 settings와 지원되는 hooks.
-- Configurable model과 증명된 runtime enforcement를 구분하는 capability probe.
+- `CLAUDE.md` 내부의 같은 네 줄 marker 기반 guidance block.
+- `roles`가 선언된 경우에만 native `model`·effort가 포함된 custom subagent, 기존 내용을 보존하는 settings, scoped guard.
+- request-consistency check와 증명된 runtime enforcement를 구분하는 capability evidence.
 
 Claude Code는 custom subagent 정의의 model 선택과 해석 순서를 [Create custom subagents](https://code.claude.com/docs/en/sub-agents)에서 공식 지원합니다. [Hooks reference](https://code.claude.com/docs/en/hooks)는 차단 가능한 event와 관찰 또는 context 주입만 가능한 lifecycle event를 구분합니다. OrbitLane은 이 native 보장 범위를 마케팅 문구로 넓히지 않습니다.
 
@@ -222,7 +234,7 @@ v1에는 telemetry를 넣지 않을 계획입니다.
 
 ### Superpowers 없이도 사용자 지시로 라우팅 contract를 작동시킬 수 있나요?
 
-네. Contract는 workflow와 독립적입니다. 사용자 instruction, native agent 정의, OMX workflow, Superpowers skill 또는 다른 adapter가 선언된 역할이나 작업 형태를 선택할 수 있습니다. Runtime adapter는 그 선택을 대상 runtime이 지원하는 가장 강한 configuration surface로 projection합니다.
+네. Contract는 workflow와 독립적입니다. 사용자 instruction, native agent 정의, OMX workflow, Superpowers skill 또는 다른 adapter가 선언된 역할이나 작업 형태를 선택할 수 있습니다. 모든 contract는 guidance를 projection하며, `roles` 선언은 Claude target의 scoped request-consistency check를 추가로 opt in합니다.
 
 ### Tier 2가 아니어도 OrbitLane은 작동하나요?
 
@@ -259,7 +271,7 @@ v1에는 telemetry를 넣지 않을 계획입니다.
 
 ## 프로젝트 상태
 
-OrbitLane v0.1.0이 Tier 1 CLI로 npm에 배포되었습니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code adapter, Claude Code scoped spawn guard. Review는 contract, claim boundary, adapter interface와 cross-platform 설치 동작에 집중해야 합니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
+OrbitLane v0.3.0이 Tier 1 CLI로 npm에 배포되었습니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code의 target-specific 네 줄 guidance, opt-in Claude Code scoped request-consistency guard. Guard는 실제 실행 model을 증명하지 않으며 `effective_model`은 계속 `unproven`입니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
 
 ## 검색 및 발견성 메모
 

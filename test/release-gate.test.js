@@ -126,6 +126,18 @@ test("README status is consistently post-publish and bounded to Tier 1 plus scop
   assert.match(changelog, new RegExp(`^## ${version.replace(/\./g, "\\.")}$`, "m"), `CHANGELOG must have a section for ${version}`);
 });
 
+test("the READMEs separate guidance from enforcement", async () => {
+  const [english, korean] = await Promise.all([
+    readFile(resolve(root, "README.md"), "utf8"),
+    readFile(resolve(root, "README.ko.md"), "utf8"),
+  ]);
+
+  for (const text of [english, korean]) {
+    assert.doesNotMatch(text, /Contract routes:/, "the role-table projection is gone");
+  }
+  assert.match(english, /guidance/i);
+});
+
 test("spawn guard decision p95 remains below the 50ms local budget", () => {
   const samples = [];
   for (let index = 0; index < 101; index += 1) {
