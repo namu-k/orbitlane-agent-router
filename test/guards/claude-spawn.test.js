@@ -45,6 +45,54 @@ test("yields to an explicit model instead of denying, and never blocks on token 
   }
 });
 
+test("reads CLAUDE_CODE_SUBAGENT_MODEL above the call, matching the runtime's own order", () => {
+  // The runtime resolves the environment variable BEFORE the per-invocation model, so
+  // recording the call's model here would name a model the session never ran.
+  // https://code.claude.com/docs/en/sub-agents#choose-a-model
+  const routed = contractFor("sonnet");
+
+  // Call agrees with the contract, environment overrides it: the environment wins.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor", model: "sonnet", environment_model: "opus" }, contract: routed }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "EXPLICIT_MODEL_RETAINED",
+    effective_model: "unproven",
+    declared_model: "opus",
+    routed_model: "sonnet",
+  });
+
+  // Call diverges but the environment agrees with the contract: this is a match, and
+  // reporting a divergence would be the same error in the other direction.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor", model: "haiku", environment_model: "sonnet" }, contract: routed }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "CONTRACT_MATCH",
+    effective_model: "unproven",
+  });
+
+  // `inherit` is not a choice: since v2.1.196 it means "keep resolving", so the call wins.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor", model: "haiku", environment_model: "inherit" }, contract: routed }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "EXPLICIT_MODEL_RETAINED",
+    effective_model: "unproven",
+    declared_model: "haiku",
+    routed_model: "sonnet",
+  });
+});
+
+test("does not inject fable even when a lane binds it", () => {
+  // Accepted by the runtime, but it needs Claude Code v2.1.170+ (which the guard cannot
+  // see) and it is never the cheaper choice. The lane stays guidance-only.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor" }, contract: contractFor("fable") }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "ROUTED_MODEL_NOT_INJECTABLE",
+    effective_model: "unproven",
+    routed_model: "fable",
+  });
+});
+
 test("routes an unspecified model to the lane model so the spawn gets the cheaper tier", () => {
   // The whole point of the contract: the caller expressed no preference, so the
   // routed model is written into the call rather than the runtime default running.

@@ -37,9 +37,10 @@ async function fixture(t) {
   return { directory, configDir, evidencePath: join(configDir, ".orbitlane", "claude-heartbeats.jsonl") };
 }
 
-async function invoke({ configDir, evidencePath, payload, cwd, installedScope }) {
+async function invoke({ configDir, evidencePath, payload, cwd, installedScope, env }) {
   const args = installedScope === undefined ? [hook, configDir, evidencePath] : [hook, configDir, evidencePath, installedScope];
-  const child = execFileAsync(process.execPath, args, { cwd, encoding: "utf8" });
+  // env is per-invocation so a subagent-model override cannot leak into other cases.
+  const child = execFileAsync(process.execPath, args, { cwd, encoding: "utf8", ...(env === undefined ? {} : { env }) });
   child.child.stdin.end(JSON.stringify(payload));
   try {
     const { stdout, stderr } = await child;
@@ -95,6 +96,26 @@ test("a diverging Agent spawn is allowed and recorded rather than denied", async
   assert.equal(result.code, 0);
   const { readFile } = await import("node:fs/promises");
   assert.match(await readFile(evidencePath, "utf8"), /"reason":"EXPLICIT_MODEL_RETAINED"/);
+});
+
+test("a CLAUDE_CODE_SUBAGENT_MODEL override is what the heartbeat names, not the call", async (t) => {
+  const { directory, configDir, evidencePath } = await fixture(t);
+  const result = await invoke({
+    configDir,
+    evidencePath,
+    // The call agrees with the contract; the environment does not. The runtime resolves
+    // the environment first, so that is the model the evidence has to name.
+    payload: { tool_name: "Agent", tool_use_id: "env-1", tool_input: { subagent_type: "executor", model: "claude-terra" } },
+    cwd: directory,
+    env: { ...process.env, CLAUDE_CODE_SUBAGENT_MODEL: "opus" },
+  });
+
+  assert.equal(result.code, 0);
+  const { readFile } = await import("node:fs/promises");
+  const heartbeat = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
+  assert.equal(heartbeat.reason, "EXPLICIT_MODEL_RETAINED");
+  assert.equal(heartbeat.routed_model, "claude-terra");
+  assert.equal(heartbeat.injected_model, null);
 });
 
 test("an unspecified model is rewritten to the routed model on stdout", async (t) => {

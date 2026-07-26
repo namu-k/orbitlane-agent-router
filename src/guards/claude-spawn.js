@@ -8,8 +8,16 @@ import { isInjectableClaudeModel } from "../config/claude-models.js";
 // deliberate choice. The router yields to it and records the divergence rather than
 // blocking: a denied spawn spends tokens on a failed turn and a retry, which is the
 // opposite of what the contract exists to achieve.
+//
+// The order mirrors the runtime's own resolution, which puts the environment variable
+// ABOVE the per-invocation parameter: CLAUDE_CODE_SUBAGENT_MODEL overrides the model
+// argument and the frontmatter. Reading the call first would make the heartbeat name a
+// model the session never ran. `inherit` is not a choice — since v2.1.196 it means
+// "continue resolving", so resolution falls through to the call.
+// https://code.claude.com/docs/en/sub-agents#choose-a-model
 function explicitModel(input) {
-  for (const candidate of [input.model, input.model_override, input.environment_model === "inherit" ? undefined : input.environment_model]) {
+  const environment = input.environment_model === "inherit" ? undefined : input.environment_model;
+  for (const candidate of [environment, input.model, input.model_override]) {
     if (typeof candidate === "string") return candidate;
   }
   return undefined;
