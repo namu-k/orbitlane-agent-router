@@ -11,7 +11,7 @@
   "targets": {
     "claude": {
       "lanes": {
-        "sol": { "model": "claude-opus" }
+        "sol": { "model": "opus" }
       }
     }
   }
