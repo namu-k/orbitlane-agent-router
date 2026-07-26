@@ -188,7 +188,7 @@ Tier 1은 정상적이고 유용한 운영 모드입니다. marker-bounded guida
 
 contract가 roles를 선언하면 v1 Claude Code adapter는 Agent tool 호출에 대한 **scoped** routing pass를 추가로 적용합니다. Model을 지정하지 않은 spawn에는 routed model을 써 넣고, 그 외의 spawn은 기록한 뒤 통과시킵니다. 이는 별도 tier가 아니라 Tier 1 내부의 한정된 capability(`claude_agent_pre_dispatch`)로 보고되며, 실제 실행 model의 보장도 아니고 모든 spawn path를 포함한다는 주장도 아닙니다.
 
-Routing은 Agent tool이 받아들이는 model만 채울 수 있습니다. 그 집합 밖의 token — 예를 들어 고정된 전체 model 식별자 — 에 bind된 lane은 guidance로는 계속 projection되지만, guard는 runtime이 거부할 호출로 다시 쓰는 대신 그런 spawn을 건드리지 않습니다. 생성된 report는 각 route에 `injectable`을 표시하므로 설치 시점에 확인할 수 있습니다. 고정 식별자를 alias로 매핑하는 것은 의도적으로 하지 않습니다. Alias는 그 시점에 가리키는 model로 해석되기 때문입니다.
+Routing이 채워 넣는 model은 좁은 allowlist — `sonnet`, `opus`, `haiku` — 에 한정됩니다. 이것은 runtime의 제약이 아니라 OrbitLane 자신의 제한입니다. Claude Code는 subagent model로 `fable`과 `claude-opus-5` 같은 전체 model ID도 받아들입니다. 그럼에도 allowlist를 좁게 두는 이유는 주입이 실제 실행되는 것을 바꾸기 때문입니다. `fable`은 guard가 관측할 수 없는 최소 Claude Code 버전을 요구하고 더 싼 선택이 되는 경우도 없으며, 고정 식별자를 alias로 다시 쓰는 일은 하지 않습니다. Alias는 그 시점에 가리키는 model로 해석되기 때문입니다. Allowlist 밖에 bind된 lane은 guidance로는 계속 projection되고 routing만 건너뜁니다. 생성된 report가 각 route에 `injectable`을 표시하므로 설치 시점에 확인할 수 있습니다.
 
 Tier 2는 대상 runtime이 다음 세 capability를 모두 증명할 때만 선택합니다.
 

@@ -37,9 +37,16 @@ Codex, and whether to inject there is an open decision, not a settled impossibil
 - A role name is matched against the runtime's own agent identifier **verbatim and
   case-sensitively**. `Explore` is not `explore`. A role naming no real agent routes
   nothing — see `fixtures/contracts/claude-native-agent-roles.json` for names that work.
-- Injection only fills in models the target runtime accepts. A pinned full identifier
-  is never mapped onto an alias; the alias resolves to whichever model it currently
-  points at, which is a different model at a different price.
+- Injection fills in only `sonnet`, `opus`, `haiku`. That allowlist is narrower than
+  what the runtime accepts — Claude Code also takes `fable` and full model IDs — and
+  narrower on purpose, because injection changes what runs. Do not describe anything
+  outside it as "rejected by the runtime"; it is unrouted by our choice. `fable` needs
+  a Claude Code version the guard cannot observe and is never the cheaper choice, and a
+  pinned identifier is never rewritten to an alias, which would resolve to a different
+  model at a different price.
+- Model precedence follows the runtime, not intuition: `CLAUDE_CODE_SUBAGENT_MODEL`
+  outranks the per-call `model`. Reading the call first makes the heartbeat name a
+  model the session never ran. `inherit` means "keep resolving", not "a choice".
 - `effective_model` is always `unproven`. Rewriting a request does not observe what
   ran. Never report an unproven capability as success.
 - Skill- and plugin-driven work is where routing pays off most; it is not a boundary

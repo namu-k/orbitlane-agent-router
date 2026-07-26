@@ -45,6 +45,14 @@ A 0.3.0 CLI can uninstall a guard that 0.2.0 installed.
 - Heartbeats carry `routed_model` and `injected_model` so a reader can tell whether
   routing actually happened. `effective_model` is still `unproven` — rewriting a
   request does not observe what ran.
+- The guard resolves `CLAUDE_CODE_SUBAGENT_MODEL` above the per-invocation `model`,
+  matching the runtime's own order. Reading the call first recorded `CONTRACT_MATCH`
+  for a spawn the environment had already redirected elsewhere, so the heartbeat named
+  a model the session never ran. `inherit` still means "keep resolving" rather than a
+  choice, so it falls through to the call.
+- `fable` is no longer injected. The runtime accepts it, but it requires a minimum
+  Claude Code version the guard cannot observe, and it could never be the cheaper
+  choice. A lane bound to it is reported `injectable: false` and left to guidance.
 - Role names may contain capitals: the grammar is now `^[A-Za-z][A-Za-z0-9-]{0,63}$`.
   A role name is compared against the runtime's own agent identifier verbatim, and
   Claude Code ships `Explore` and `Plan`, so the lowercase-only grammar made those
