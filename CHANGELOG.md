@@ -48,8 +48,7 @@ A 0.3.0 CLI can uninstall a guard that 0.2.0 installed.
 - The guard resolves `CLAUDE_CODE_SUBAGENT_MODEL` above the per-invocation `model`,
   matching the runtime's own order. Reading the call first recorded `CONTRACT_MATCH`
   for a spawn the environment had already redirected elsewhere, so the heartbeat named
-  a model the session never ran. `inherit` still means "keep resolving" rather than a
-  choice, so it falls through to the call.
+  a model the session never ran.
 - `fable` is no longer injected. The runtime accepts it, but it requires a minimum
   Claude Code version the guard cannot observe, and it could never be the cheaper
   choice. A lane bound to it is reported `injectable: false` and left to guidance.
