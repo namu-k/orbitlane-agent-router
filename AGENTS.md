@@ -19,15 +19,18 @@ not against how much of the runtime the contract controls.
 | -------------- | ---------------------------------------- | --------------------------- |
 | Reads          | `lanes` + `targets[t].lanes`, **not** `roles` | `roles` → lane → model |
 | Installed      | always                                   | only when `roles` is declared |
-| Targets        | Codex and Claude                         | Claude only                 |
+| Targets        | Codex and Claude                         | Claude only, as built today |
 | Nature         | advice the agent may ignore              | rewrites the actual call    |
 
 Both resolve models through `src/config/lanes.js`, so guidance and injection can never
 name different models. Most of the saving in practice comes from the guidance kernel.
 
-The guard is Claude-only for a structural reason, not an unfinished one: Codex decides
-the model in the agent definition file (`~/.codex/agents/*.toml`), and its
-`spawn_agent(task_name, message, fork_turns)` carries no model argument to rewrite.
+The guard is Claude-only because v0.3.0 installs no Codex guard, not because Codex
+cannot be routed. Do not repeat the earlier claim that Codex carries no model to
+rewrite — measurement on `codex-cli 0.145.0` refuted it. Codex surfaces differ from
+each other: native delegation spawns without a model, while skill fan-out was observed
+calling `spawn_agent` with `model` on every call. So no single call shape describes
+Codex, and whether to inject there is an open decision, not a settled impossibility.
 
 ## Constraints that are easy to get wrong
 
