@@ -159,6 +159,9 @@ test("projects stable Claude subagents and an honest Tier 1 report without trans
     requested_model: "claude-sol",
     resolution: "target-binding",
     provenance: "user-local",
+    // `claude-sol` is not a model the Agent tool accepts, so this role is projected
+    // as guidance but the guard will never write it into a spawn.
+    injectable: false,
     effective_model: "unproven",
   });
   assert.deepEqual(generated.requested_routes.executor.release, runtimeDefaults.release);

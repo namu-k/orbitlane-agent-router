@@ -24,27 +24,50 @@ function contractFor(model) {
   };
 }
 
-test("enforces exact model tokens and preserves the unproven effective-model boundary", () => {
+test("yields to an explicit model instead of denying, and never blocks on token shape", () => {
   const alias = "sonnet";
   const fullId = "claude-sonnet-4-5-20250929";
+  // A denied spawn spends a failed turn plus a retry, so nothing here blocks: an
+  // explicit model is honoured and the divergence from the contract is recorded.
   const cases = [
-    ["alias contract rejects full identifier", contractFor(alias), { subagent_type: "executor", model: fullId }, 2, "CONTRACT_MISMATCH"],
-    ["full identifier contract rejects alias", contractFor(fullId), { subagent_type: "executor", model: alias }, 2, "CONTRACT_MISMATCH"],
-    ["exact alias allows", contractFor(alias), { subagent_type: "executor", model: alias }, 0, "CONTRACT_MATCH"],
-    ["exact full identifier allows", contractFor(fullId), { subagent_type: "executor", model: fullId }, 0, "CONTRACT_MATCH"],
-    ["exact call override allows", contractFor(alias), { subagent_type: "executor", model: alias, model_override: alias }, 0, "CONTRACT_MATCH"],
-    ["mismatched call override denies", contractFor(alias), { subagent_type: "executor", model: alias, model_override: fullId }, 2, "DETECTABLE_MODEL_OVERRIDE"],
-    ["exact environment model allows", contractFor(alias), { subagent_type: "executor", model: alias, environment_model: alias }, 0, "CONTRACT_MATCH"],
-    ["inherit environment model allows", contractFor(alias), { subagent_type: "executor", model: alias, environment_model: "inherit" }, 0, "CONTRACT_MATCH"],
-    ["mismatched environment model denies", contractFor(alias), { subagent_type: "executor", model: alias, environment_model: fullId }, 2, "DETECTABLE_MODEL_OVERRIDE"],
-    ["routed role without an explicit model denies despite metadata", contractFor(alias), { subagent_type: "executor", frontmatter: { model: alias }, environment_model: "inherit", model_override: alias }, 2, "INVALID_AGENT_TOOL_INPUT"],
-    ["unmanaged role remains allowed without an explicit model", contractFor(alias), { subagent_type: "general-purpose", frontmatter: { model: alias }, environment_model: "inherit" }, 0, "UNMANAGED_ROLE"],
+    ["alias contract retains an explicit full identifier", contractFor(alias), { subagent_type: "executor", model: fullId }, "EXPLICIT_MODEL_RETAINED", { declared_model: fullId, routed_model: alias }],
+    ["full identifier contract retains an explicit alias", contractFor(fullId), { subagent_type: "executor", model: alias }, "EXPLICIT_MODEL_RETAINED", { declared_model: alias, routed_model: fullId }],
+    ["exact alias matches", contractFor(alias), { subagent_type: "executor", model: alias }, "CONTRACT_MATCH", {}],
+    ["exact full identifier matches", contractFor(fullId), { subagent_type: "executor", model: fullId }, "CONTRACT_MATCH", {}],
+    ["inherit environment model does not count as explicit", contractFor(alias), { subagent_type: "executor", model: alias, environment_model: "inherit" }, "CONTRACT_MATCH", {}],
+    ["a diverging environment model is retained, not denied", contractFor(alias), { subagent_type: "executor", environment_model: fullId }, "EXPLICIT_MODEL_RETAINED", { declared_model: fullId, routed_model: alias }],
+    ["unmanaged role remains allowed without an explicit model", contractFor(alias), { subagent_type: "general-purpose", environment_model: "inherit" }, "UNMANAGED_ROLE", {}],
   ];
 
-  for (const [name, caseContract, input, exitCode, reason] of cases) {
+  for (const [name, caseContract, input, reason, extra] of cases) {
     const result = evaluateClaudeAgentSpawn({ input, contract: caseContract });
-    assert.deepEqual(result, { exitCode, decision: exitCode === 0 ? "allow" : "deny", reason, effective_model: "unproven" }, name);
+    assert.deepEqual(result, { exitCode: 0, decision: "allow", reason, effective_model: "unproven", ...extra }, name);
   }
+});
+
+test("routes an unspecified model to the lane model so the spawn gets the cheaper tier", () => {
+  // The whole point of the contract: the caller expressed no preference, so the
+  // routed model is written into the call rather than the runtime default running.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor" }, contract: contractFor("haiku") }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "ROUTED_MODEL_INJECTED",
+    effective_model: "unproven",
+    routed_model: "haiku",
+    injected_model: "haiku",
+  });
+});
+
+test("declines to inject a model the Agent tool would reject rather than breaking the spawn", () => {
+  // `claude-terra` is not an accepted Agent tool model. Writing it in would turn a
+  // working spawn into a failed one, which costs more than leaving it unrouted.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor" }, contract: contractFor("claude-terra") }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "ROUTED_MODEL_NOT_INJECTABLE",
+    effective_model: "unproven",
+    routed_model: "claude-terra",
+  });
 });
 
 test("allows a matching Claude Agent tool spawn and records an unproven heartbeat", async (t) => {
@@ -66,6 +89,8 @@ test("allows a matching Claude Agent tool spawn and records an unproven heartbea
     decision: "allow",
     effective_model: "unproven",
     reason: "CONTRACT_MATCH",
+    routed_model: null,
+    injected_model: null,
     timestamp: "2026-07-22T00:00:00.000Z",
     selected_scope: null,
     contract_sha256: null,
@@ -74,21 +99,46 @@ test("allows a matching Claude Agent tool spawn and records an unproven heartbea
   });
 });
 
-test("denies a detectable model override even when the declared model matches", () => {
+test("records the routed model in the heartbeat so injection is auditable after the fact", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "orbitlane-guard-"));
+  const evidencePath = join(directory, "heartbeats.jsonl");
+  t.after(async () => { await import("node:fs/promises").then(({ rm }) => rm(directory, { recursive: true, force: true })); });
+
+  await runClaudeSpawnGuard({
+    input: { subagent_type: "executor" },
+    contract: contractFor("haiku"),
+    evidencePath,
+    correlationId: "injected-1",
+    now: () => "2026-07-22T00:00:00.000Z",
+  });
+
+  const heartbeat = JSON.parse(await readFile(evidencePath, "utf8"));
+  assert.equal(heartbeat.reason, "ROUTED_MODEL_INJECTED");
+  assert.equal(heartbeat.routed_model, "haiku");
+  assert.equal(heartbeat.injected_model, "haiku");
+  // Rewriting the request still proves nothing about what ran.
+  assert.equal(heartbeat.effective_model, "unproven");
+});
+
+test("reads the tool's own model first when a secondary override field is also present", () => {
+  // `model` is the field the Agent tool actually carries; `model_override` is only a
+  // fallback for runtimes that surface the choice elsewhere. Neither one denies.
   assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor", model: "claude-terra", model_override: "other" }, contract }), {
-    exitCode: 2,
-    decision: "deny",
-    reason: "DETECTABLE_MODEL_OVERRIDE",
+    exitCode: 0,
+    decision: "allow",
+    reason: "CONTRACT_MATCH",
     effective_model: "unproven",
   });
 });
 
-test("denies a contract-routed role spawned with the wrong model", () => {
+test("retains a contract-routed role spawned with a different explicit model", () => {
   assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor", model: "wrong" }, contract }), {
-    exitCode: 2,
-    decision: "deny",
-    reason: "CONTRACT_MISMATCH",
+    exitCode: 0,
+    decision: "allow",
+    reason: "EXPLICIT_MODEL_RETAINED",
     effective_model: "unproven",
+    declared_model: "wrong",
+    routed_model: "claude-terra",
   });
 });
 
@@ -103,21 +153,17 @@ test("passes through a subagent type the contract does not route", () => {
   });
 });
 
-test("passes through an unmanaged role even with no model, but a routed role must declare one", () => {
-  // An unmanaged role is out of scope, so a missing model is not the guard's concern.
-  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "Explore" }, contract }), {
-    exitCode: 0,
-    decision: "allow",
-    reason: "UNMANAGED_ROLE",
-    effective_model: "unproven",
-  });
-  // A routed role with no model cannot be checked, so it is denied.
-  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor" }, contract }), {
-    exitCode: 2,
-    decision: "deny",
-    reason: "INVALID_AGENT_TOOL_INPUT",
-    effective_model: "unproven",
-  });
+test("passes an unmanaged role through untouched, model or no model", () => {
+  // An unmanaged role is an explicit choice of agent, so the contract stays out of it
+  // entirely — it is neither checked nor routed.
+  for (const input of [{ subagent_type: "Explore" }, { subagent_type: "Explore", model: "opus" }]) {
+    assert.deepEqual(evaluateClaudeAgentSpawn({ input, contract }), {
+      exitCode: 0,
+      decision: "allow",
+      reason: "UNMANAGED_ROLE",
+      effective_model: "unproven",
+    });
+  }
 });
 
 test("still denies a detectable override on an unmanaged role's routed collision is not possible", () => {
@@ -130,13 +176,14 @@ test("still denies a detectable override on an unmanaged role's routed collision
   });
 });
 
-test("keeps the decision when heartbeat recording fails and keeps invalid input denied", async () => {
+test("keeps the decision when heartbeat recording fails and keeps unroutable input denied", async () => {
   const allowed = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "claude-terra" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
   assert.deepEqual(allowed, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven", heartbeat_recorded: false });
 
-  const denied = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "wrong" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
-  assert.deepEqual(denied, { exitCode: 2, decision: "deny", reason: "CONTRACT_MISMATCH", effective_model: "unproven", heartbeat_recorded: false });
+  const retained = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "wrong" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
+  assert.deepEqual(retained, { exitCode: 0, decision: "allow", reason: "EXPLICIT_MODEL_RETAINED", effective_model: "unproven", declared_model: "wrong", routed_model: "claude-terra", heartbeat_recorded: false });
 
+  // A call with no role name cannot be routed or classified, so it stays denied.
   assert.deepEqual(evaluateClaudeAgentSpawn({ input: null, contract }), { exitCode: 2, decision: "deny", reason: "INVALID_AGENT_TOOL_INPUT", effective_model: "unproven" });
 });
 

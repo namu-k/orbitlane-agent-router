@@ -22,8 +22,10 @@ const provenance = {
 };
 
 test("a deny survives a heartbeat write failure", async () => {
+  // Only an unroutable call still denies; a model that diverges from the contract is
+  // an explicit choice and is allowed.
   const result = await runClaudeSpawnGuard({
-    input: { subagent_type: "executor", model: "wrong-model" },
+    input: { model: "wrong-model" },
     contract,
     ...provenance,
     appendHeartbeat: () => { throw new Error("disk full"); },
@@ -32,7 +34,7 @@ test("a deny survives a heartbeat write failure", async () => {
 
   assert.equal(result.decision, "deny");
   assert.equal(result.exitCode, 2);
-  assert.equal(result.reason, "CONTRACT_MISMATCH");
+  assert.equal(result.reason, "INVALID_AGENT_TOOL_INPUT");
   assert.equal(result.heartbeat_recorded, false);
 });
 

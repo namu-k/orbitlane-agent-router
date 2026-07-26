@@ -25,8 +25,14 @@ async function invoke(cliPath, args, options = {}) { try { const { stdout, stder
 async function spawnAgent(root, model, scope) {
   const args = [join(root, ".orbitlane", "hook", "guards", "claude-spawn-hook.js"), root, join(root, ".orbitlane", "claude-heartbeats.jsonl"), scope];
   const child = execFileAsync(process.execPath, args, { cwd: root, encoding: "utf8" });
-  child.child.stdin.end(JSON.stringify({ tool_name: "Agent", tool_input: { subagent_type: "executor", model } }));
-  try { const { stderr } = await child; return { code: 0, stderr }; } catch (error) { return { code: error.code, stderr: error.stderr }; }
+  child.child.stdin.end(JSON.stringify({ tool_name: "Agent", tool_use_id: "vendored-1", tool_input: { subagent_type: "executor", model } }));
+  try { const { stdout, stderr } = await child; return { code: 0, stdout, stderr }; } catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
+}
+
+// The vendored hook no longer proves it resolved a contract by denying, so the
+// heartbeat is what shows the copied runtime read the contract and routed the role.
+async function heartbeat(root) {
+  return readFile(join(root, ".orbitlane", "claude-heartbeats.jsonl"), "utf8");
 }
 
 test("a global Claude guard installed from an evicted npx cache still decides", async (t) => {
@@ -37,9 +43,9 @@ test("a global Claude guard installed from an evicted npx cache still decides", 
   await rm(cache, { recursive: true, force: true });
 
   assert.equal((await spawnAgent(claudeHome, "claude-terra", "global")).code, 0);
-  const denied = await spawnAgent(claudeHome, "other-model", "global");
-  assert.equal(denied.code, 2);
-  assert.match(denied.stderr, /CONTRACT_MISMATCH/);
+  const diverging = await spawnAgent(claudeHome, "other-model", "global");
+  assert.equal(diverging.code, 0);
+  assert.match(await heartbeat(claudeHome), /"reason":"EXPLICIT_MODEL_RETAINED"/);
 });
 
 test("a project Claude guard survives eviction of the package that installed it", async (t) => {
@@ -51,7 +57,8 @@ test("a project Claude guard survives eviction of the package that installed it"
   await rm(cache, { recursive: true, force: true });
 
   assert.equal((await spawnAgent(projectRoot, "claude-terra", "project")).code, 0);
-  assert.equal((await spawnAgent(projectRoot, "other-model", "project")).code, 2);
+  assert.equal((await spawnAgent(projectRoot, "other-model", "project")).code, 0);
+  assert.match(await heartbeat(projectRoot), /"reason":"EXPLICIT_MODEL_RETAINED"/);
 });
 
 test("the vendored runtime declares its own module scope", async (t) => {

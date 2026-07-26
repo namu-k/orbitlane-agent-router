@@ -60,6 +60,19 @@ if (payload !== undefined) {
         resolverPolicyVersion: RESOLVER_POLICY_VERSION,
       });
       if (result.exitCode === 2) process.stderr.write(`${result.reason} selected_scope=${resolved.scope} installed_scope=${installedScope ?? "unknown"} report_path=${resolved.reportPath}\n`);
+      else if (typeof result.injected_model === "string") {
+        // The caller left the model open, so the contract fills it in. Rewriting the
+        // input is the only point at which OrbitLane changes what actually runs; it
+        // is built from the real tool input, never from the guard's synthesised view.
+        process.stdout.write(`${JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "allow",
+            permissionDecisionReason: `ORBITLANE ${result.reason}: ${payload.tool_input?.subagent_type} -> ${result.injected_model}`,
+            updatedInput: { ...(payload.tool_input ?? {}), model: result.injected_model },
+          },
+        })}\n`);
+      }
       process.exitCode = result.exitCode;
     }
   }
