@@ -1,8 +1,11 @@
-# OrbitLane Agent Router
+@AGENTS.md
 
-Canonical routing contract compiler for coding-agent runtimes (Codex/OMX, Claude Code).
+## Claude Code
 
-## Skill routing
+Everything above is shared with Codex/OMX via `AGENTS.md`. Only Claude Code-specific
+instructions belong below this line.
+
+### Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
 
