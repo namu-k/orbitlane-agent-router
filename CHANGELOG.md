@@ -33,6 +33,30 @@ A 0.3.0 CLI can uninstall a guard that 0.2.0 installed.
 - Codex reports a guidance-only status instead of `partial enforcement`; it has no
   guard and never had one. The Claude guard is a request-consistency check, not a
   guarantee of the executing model, and `effective_model` stays `unproven`.
+- **The Claude guard routes instead of denying.** A spawn that names no model now
+  has the routed lane model written into it through the `PreToolUse`
+  `updatedInput` contract; explicit choices — a model on the call, a concrete
+  `CLAUDE_CODE_SUBAGENT_MODEL`, or an unrouted role — pass through and are
+  recorded. `CONTRACT_MISMATCH` and `DETECTABLE_MODEL_OVERRIDE` denials are gone,
+  replaced by the `EXPLICIT_MODEL_RETAINED` and `ROUTED_MODEL_INJECTED` heartbeat
+  reasons. A guard that could only deny never saved a token: it converted a
+  routable spawn into a failed turn plus a retry. Denial is now limited to a call
+  with no role name and to a contract that cannot be resolved.
+- Heartbeats carry `routed_model` and `injected_model` so a reader can tell whether
+  routing actually happened. `effective_model` is still `unproven` — rewriting a
+  request does not observe what ran.
+- Role names may contain capitals: the grammar is now `^[A-Za-z][A-Za-z0-9-]{0,63}$`.
+  A role name is compared against the runtime's own agent identifier verbatim, and
+  Claude Code ships `Explore` and `Plan`, so the lowercase-only grammar made those
+  agent types impossible to route at all. Existing lowercase names are unaffected.
+- `fixtures/contracts/claude-native-agent-roles.json` shows a contract that routes
+  the agent types a stock Claude Code session actually spawns. The stable catalog
+  names (`architect`, `executor`, …) describe a team shape and route nothing until
+  agents by those exact names exist, because OrbitLane installs no agent definitions.
+- The Claude report marks each requested route `injectable`. Routing can only fill
+  in a model the Agent tool accepts, so a lane bound to a pinned full identifier is
+  projected as guidance but never written into a spawn. Pinned identifiers are
+  deliberately not mapped onto aliases, which would resolve to a different model.
 
 ### Fixed
 

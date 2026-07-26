@@ -77,8 +77,12 @@ target의 tier-to-model binding을 담지만 enforcement는 아닙니다. Codex�
 
 **Opt-in enforcement**는 contract가 `roles`를 선언할 때만 적용됩니다. 그때만 Claude
 target이 guard runtime을 그것이 읽을 report 옆인 `<config root>/.orbitlane/hook/`으로
-복사하고 `settings.json`에 scoped hook을 추가합니다. 이 guard는 request-consistency
-check이지 실제 실행 model의 보장이 아니며, `effective_model`은 계속 `unproven`입니다.
+복사하고 `settings.json`에 scoped hook을 추가합니다. 이 guard는 model을 지정하지 않은
+spawn에 routed model을 채워 넣고, 그 밖의 경우에는 비켜섭니다. 명시적으로 지명된 model,
+구체적인 `CLAUDE_CODE_SUBAGENT_MODEL`, contract가 routing하지 않는 role은 모두 그대로
+통과하며 기록만 남습니다. Model 선택을 이유로 spawn을 차단하지는 않습니다. 차단된 spawn은
+실패한 턴과 재시도 비용을 발생시키므로 목적에 반하기 때문입니다. 요청을 다시 쓰는 것 역시
+실제 실행 model의 보장은 아니며, `effective_model`은 계속 `unproven`입니다.
 `roles`가 없는 contract는 guidance만 설치합니다. `settings.json` hook도 vendored guard
 runtime도 만들지 않습니다. 설치한 package가 사라진 뒤에도 Claude guard는 계속 판정하며,
 이는 `npx`와 `dlx`의 정상적인 최종 상태입니다. `npx orbitlane install`은 모든 target과
@@ -143,6 +147,20 @@ OrbitLane은 workflow 문장에 특정 vendor의 현재 model 이름을 고정�
 
 Lane은 canonical id(`sol` / `terra` / `luna`)와 `class`(judgment / implementation / bounded-retrieval) 두 층으로 표현합니다. 네 줄 kernel을 설치하려면 선택한 target의 세 lane(`sol`, `terra`, `luna`) 모두가 해당 target의 binding 또는 runtime의 공식 default로 해석되어야 하며, 모호하면 추측하지 않고 실패합니다. `roles`는 선택 사항입니다. 있을 때에는 각 routed role에 provenance가 필요하며, `roles`를 생략하면 의도적으로 guidance-only 설치를 선택합니다.
 
+### Role 이름은 runtime이 쓰는 agent 식별자여야 합니다
+
+Guard는 role 이름을 runtime이 spawn에 붙인 식별자와 그대로, 대소문자까지 구분해 대조합니다. 위 예시의 `architect`, `executor`, `explore`는 팀 형태를 서술할 뿐이며, 정확히 그 이름의 agent가 존재하기 전까지는 아무것도 routing하지 않습니다. OrbitLane은 agent 정의 파일을 설치하지 않기 때문입니다. 기본 Claude Code 세션이 이미 spawn하는 agent를 routing하려면 그 이름을 그대로 씁니다.
+
+```json
+"roles": {
+  "Explore":         { "lane": "luna",  "provenance": "user-approved" },
+  "general-purpose": { "lane": "terra", "provenance": "user-approved" },
+  "Plan":            { "lane": "sol",   "provenance": "user-approved" }
+}
+```
+
+`fixtures/contracts/claude-native-agent-roles.json`이 이 계약의 전체 형태입니다. 이것은 "전부 가장 싼 lane으로 보내기"가 아닙니다. 절감이 나오는 곳은 bounded lookup이고, 다단계 작업은 두 단계가 아니라 한 단계만 내리며, 판단은 의도적으로 비싼 lane에 남깁니다. 계약이 이름 붙이지 않은 것과 이미 model을 지정한 spawn은 건드리지 않습니다.
+
 `sonnet`, `haiku`, `opus`에 binding된 Claude target의 설치 kernel은 정확히 다음 네 개의 영어 줄입니다.
 
 ```text
@@ -168,7 +186,9 @@ OrbitLane은 유용한 라우팅과 runtime 증거가 필요한 주장을 분리
 
 Tier 1은 정상적이고 유용한 운영 모드입니다. marker-bounded guidance와 생성된 audit evidence를 작성하지만, Codex native agent/model configuration이나 Claude custom subagent definition file을 설치하지는 않습니다. 또한 모든 runtime 경로가 요청된 model을 사용했다고 주장하지 않습니다.
 
-contract가 roles를 선언하면 v1 Claude Code adapter는 Agent tool 호출에 대한 **scoped** request-consistency check(불일치 시 deny)를 추가로 강제합니다. 이는 별도 tier가 아니라 Tier 1 내부의 한정된 capability(`claude_agent_pre_dispatch`)로 보고되며, 실제 실행 model의 보장도 아니고 모든 spawn path를 포함한다는 주장도 아닙니다.
+contract가 roles를 선언하면 v1 Claude Code adapter는 Agent tool 호출에 대한 **scoped** routing pass를 추가로 적용합니다. Model을 지정하지 않은 spawn에는 routed model을 써 넣고, 그 외의 spawn은 기록한 뒤 통과시킵니다. 이는 별도 tier가 아니라 Tier 1 내부의 한정된 capability(`claude_agent_pre_dispatch`)로 보고되며, 실제 실행 model의 보장도 아니고 모든 spawn path를 포함한다는 주장도 아닙니다.
+
+Routing은 Agent tool이 받아들이는 model만 채울 수 있습니다. 그 집합 밖의 token — 예를 들어 고정된 전체 model 식별자 — 에 bind된 lane은 guidance로는 계속 projection되지만, guard는 runtime이 거부할 호출로 다시 쓰는 대신 그런 spawn을 건드리지 않습니다. 생성된 report는 각 route에 `injectable`을 표시하므로 설치 시점에 확인할 수 있습니다. 고정 식별자를 alias로 매핑하는 것은 의도적으로 하지 않습니다. Alias는 그 시점에 가리키는 model로 해석되기 때문입니다.
 
 Tier 2는 대상 runtime이 다음 세 capability를 모두 증명할 때만 선택합니다.
 
@@ -215,7 +235,7 @@ Claude Code adapter는 다음을 projection합니다.
 
 - `CLAUDE.md` 내부의 같은 네 줄 marker 기반 guidance block.
 - 생성된 report. 그 안의 subagent 모양 항목은 요청 route evidence이며 설치된 Claude custom subagent definition file이 아닙니다.
-- `roles`가 선언된 경우에만 기존 내용을 보존하는 settings와 scoped guard request-consistency check를 추가하며, 이는 실제 실행 model의 보장이 아닙니다.
+- `roles`가 선언된 경우에만 기존 내용을 보존하는 settings와, model을 지정하지 않은 spawn을 lane model로 routing하는 scoped guard를 추가하며, 이는 실제 실행 model의 보장이 아닙니다.
 
 Claude Code는 custom subagent 정의의 model 선택과 해석 순서를 [Create custom subagents](https://code.claude.com/docs/en/sub-agents)에서 공식 지원합니다. OrbitLane 0.3.0은 그 파일을 설치하지 않습니다. [Hooks reference](https://code.claude.com/docs/en/hooks)는 차단 가능한 event와 관찰 또는 context 주입만 가능한 lifecycle event를 구분하며 OrbitLane의 scoped check도 그 경계를 넘지 않습니다.
 
@@ -289,7 +309,7 @@ v1에는 telemetry를 넣지 않을 계획입니다.
 
 ## 프로젝트 상태
 
-OrbitLane v0.3.0은 npm 공개를 기다리는 출시 준비 상태입니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code의 target-specific 네 줄 guidance, opt-in Claude Code scoped request-consistency guard를 포함합니다. Guard는 실제 실행 model을 증명하지 않으며 `effective_model`은 계속 `unproven`입니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
+OrbitLane v0.3.0은 npm 공개를 기다리는 출시 준비 상태입니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code의 target-specific 네 줄 guidance, model을 지정하지 않은 spawn을 대상으로 하는 opt-in Claude Code scoped routing guard를 포함합니다. Guard는 실제 실행 model을 증명하지 않으며 `effective_model`은 계속 `unproven`입니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
 
 ## 검색 및 발견성 메모
 
