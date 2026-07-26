@@ -1,0 +1,22 @@
+{
+  "contract_version": "1.0.0",
+  "lanes": {
+    "sol": { "class": "judgment", "reasoning": "high" },
+    "terra": { "class": "implementation", "reasoning": "medium" },
+    "luna": { "class": "bounded-retrieval", "reasoning": "low" }
+  },
+  "roles": {
+    "Explore": { "lane": "luna", "provenance": "user-approved" },
+    "general-purpose": { "lane": "terra", "provenance": "user-approved" },
+    "Plan": { "lane": "sol", "provenance": "user-approved" }
+  },
+  "targets": {
+    "claude": {
+      "lanes": {
+        "sol": { "model": "opus", "provenance": "user-approved" },
+        "terra": { "model": "sonnet", "provenance": "user-approved" },
+        "luna": { "model": "haiku", "provenance": "user-approved" }
+      }
+    }
+  }
+}

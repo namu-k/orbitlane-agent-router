@@ -37,9 +37,10 @@ async function fixture(t) {
   return { directory, configDir, evidencePath: join(configDir, ".orbitlane", "claude-heartbeats.jsonl") };
 }
 
-async function invoke({ configDir, evidencePath, payload, cwd, installedScope }) {
+async function invoke({ configDir, evidencePath, payload, cwd, installedScope, env }) {
   const args = installedScope === undefined ? [hook, configDir, evidencePath] : [hook, configDir, evidencePath, installedScope];
-  const child = execFileAsync(process.execPath, args, { cwd, encoding: "utf8" });
+  // env is per-invocation so a subagent-model override cannot leak into other cases.
+  const child = execFileAsync(process.execPath, args, { cwd, encoding: "utf8", ...(env === undefined ? {} : { env }) });
   child.child.stdin.end(JSON.stringify(payload));
   try {
     const { stdout, stderr } = await child;
@@ -84,16 +85,93 @@ test("an unmanaged Agent spawn passes through and is logged", async (t) => {
   assert.match(await readFile(evidencePath, "utf8"), /"reason":"UNMANAGED_ROLE"/);
 });
 
-test("a mismatched Agent spawn is denied", async (t) => {
+test("a diverging Agent spawn is allowed and recorded rather than denied", async (t) => {
   const { directory, configDir, evidencePath } = await fixture(t);
   const result = await invoke({
     configDir,
     evidencePath,
-    payload: { tool_name: "Agent", tool_input: { subagent_type: "executor", model: "other-model" } },
+    payload: { tool_name: "Agent", tool_use_id: "diverging-1", tool_input: { subagent_type: "executor", model: "other-model" } },
     cwd: directory,
   });
-  assert.equal(result.code, 2);
-  assert.match(result.stderr, /CONTRACT_MISMATCH/);
+  assert.equal(result.code, 0);
+  const { readFile } = await import("node:fs/promises");
+  assert.match(await readFile(evidencePath, "utf8"), /"reason":"EXPLICIT_MODEL_RETAINED"/);
+});
+
+test("a CLAUDE_CODE_SUBAGENT_MODEL override is what the heartbeat names, not the call", async (t) => {
+  const { directory, configDir, evidencePath } = await fixture(t);
+  const result = await invoke({
+    configDir,
+    evidencePath,
+    // The call agrees with the contract; the environment does not. The runtime resolves
+    // the environment first, so that is the model the evidence has to name.
+    payload: { tool_name: "Agent", tool_use_id: "env-1", tool_input: { subagent_type: "executor", model: "claude-terra" } },
+    cwd: directory,
+    env: { ...process.env, CLAUDE_CODE_SUBAGENT_MODEL: "opus" },
+  });
+
+  assert.equal(result.code, 0);
+  const { readFile } = await import("node:fs/promises");
+  const heartbeat = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
+  assert.equal(heartbeat.reason, "EXPLICIT_MODEL_RETAINED");
+  assert.equal(heartbeat.routed_model, "claude-terra");
+  assert.equal(heartbeat.injected_model, null);
+});
+
+test("an inherit override stops the rewrite reaching stdout", async (t) => {
+  const { directory, configDir, evidencePath } = await fixture(t);
+  const injectable = { ...contract, targets: { claude: { lanes: { terra: { model: "haiku", provenance: "user-local" } } } } };
+  const written = await writeSnapshot(configDir, "contracts", `${JSON.stringify(injectable)}\n`);
+  await writeFile(
+    join(configDir, ".orbitlane", "claude-report.json"),
+    `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: written.sha256 } })}\n`,
+    "utf8",
+  );
+
+  const result = await invoke({
+    configDir,
+    evidencePath,
+    payload: { tool_name: "Agent", tool_use_id: "inherit-1", tool_input: { subagent_type: "executor", prompt: "p" } },
+    cwd: directory,
+    env: { ...process.env, CLAUDE_CODE_SUBAGENT_MODEL: "inherit" },
+  });
+
+  assert.equal(result.code, 0);
+  // Nothing on stdout means no updatedInput: the call reaches the runtime untouched.
+  assert.equal(result.stdout.trim(), "");
+  const { readFile } = await import("node:fs/promises");
+  const heartbeat = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
+  assert.equal(heartbeat.reason, "ROUTED_MODEL_WITHHELD_INHERIT");
+  assert.equal(heartbeat.injected_model, null);
+});
+
+test("an unspecified model is rewritten to the routed model on stdout", async (t) => {
+  const { directory, configDir, evidencePath } = await fixture(t);
+  const injectable = { ...contract, targets: { claude: { lanes: { terra: { model: "haiku", provenance: "user-local" } } } } };
+  const written = await writeSnapshot(configDir, "contracts", `${JSON.stringify(injectable)}\n`);
+  await writeFile(
+    join(configDir, ".orbitlane", "claude-report.json"),
+    `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: written.sha256 } })}\n`,
+    "utf8",
+  );
+
+  const result = await invoke({
+    configDir,
+    evidencePath,
+    payload: { tool_name: "Agent", tool_use_id: "inject-1", tool_input: { subagent_type: "executor", prompt: "do the thing" } },
+    cwd: directory,
+  });
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      permissionDecisionReason: "ORBITLANE ROUTED_MODEL_INJECTED: executor -> haiku",
+      // The rest of the caller's input survives; only the model is filled in.
+      updatedInput: { subagent_type: "executor", prompt: "do the thing", model: "haiku" },
+    },
+  });
 });
 
 test("an unresolvable report denies and names the scope and report path", async (t) => {
@@ -149,16 +227,18 @@ test("a globally installed hook whose report is gone points at the global layer"
 test("a deny names both scopes so the operator knows which contract decided", async (t) => {
   const { directory, configDir, evidencePath } = await fixture(t);
 
+  // A call with no role name is the remaining deny: it can be neither routed nor
+  // classified. Model divergence is no longer a deny, so it cannot carry this case.
   const result = await invoke({
     configDir,
     evidencePath,
-    payload: { tool_name: "Agent", tool_input: { subagent_type: "executor", model: "other-model" } },
+    payload: { tool_name: "Agent", tool_input: { model: "other-model" } },
     cwd: directory,
     installedScope: "global",
   });
 
   assert.equal(result.code, 2);
-  assert.match(result.stderr, /CONTRACT_MISMATCH/);
+  assert.match(result.stderr, /INVALID_AGENT_TOOL_INPUT/);
   assert.match(result.stderr, /selected_scope=/);
   assert.match(result.stderr, /installed_scope=global/);
 });

@@ -1,4 +1,5 @@
 import { auditInstalledRoles, claudeCapabilityMatrix, validateContractForTarget } from "../../schema/index.js";
+import { isInjectableClaudeModel } from "../../config/claude-models.js";
 import { resolveLaneModels } from "../../config/lanes.js";
 import { projectPolicy } from "../../policy/index.js";
 
@@ -108,6 +109,10 @@ export function createClaudeTier1Adapter(contract, options) {
             resolution: route.modelSource,
             provenance: route.provenance,
             ...(route.release === undefined ? {} : { release: route.release }),
+            // Whether the guard can write this model into a spawn that left the model
+            // open. A false here means the role is documented but never actually
+            // routed, which is the difference between advice and a saved token.
+            injectable: isInjectableClaudeModel(route.model),
             effective_model: "unproven",
           }])),
           subagents,
