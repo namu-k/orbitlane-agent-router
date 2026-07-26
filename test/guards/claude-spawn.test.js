@@ -81,6 +81,23 @@ test("reads CLAUDE_CODE_SUBAGENT_MODEL above the call, matching the runtime's ow
   });
 });
 
+test("withholds routing when CLAUDE_CODE_SUBAGENT_MODEL is inherit", () => {
+  // From v2.1.196 `inherit` is the same as unset, but before that it forced the main
+  // conversation's model and ignored the per-invocation parameter. The guard sees no
+  // version, so injecting could be dropped while the heartbeat claimed a route.
+  assert.deepEqual(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor", environment_model: "inherit" }, contract: contractFor("haiku") }), {
+    exitCode: 0,
+    decision: "allow",
+    reason: "ROUTED_MODEL_WITHHELD_INHERIT",
+    effective_model: "unproven",
+    routed_model: "haiku",
+  });
+
+  // An unset variable is not `inherit`: resolution reaches the call on every version,
+  // so this is the ordinary routing case and must keep injecting.
+  assert.equal(evaluateClaudeAgentSpawn({ input: { subagent_type: "executor" }, contract: contractFor("haiku") }).reason, "ROUTED_MODEL_INJECTED");
+});
+
 test("does not inject fable even when a lane binds it", () => {
   // Accepted by the runtime, but it needs Claude Code v2.1.170+ (which the guard cannot
   // see) and it is never the cheaper choice. The lane stays guidance-only.

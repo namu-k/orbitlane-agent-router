@@ -118,6 +118,33 @@ test("a CLAUDE_CODE_SUBAGENT_MODEL override is what the heartbeat names, not the
   assert.equal(heartbeat.injected_model, null);
 });
 
+test("an inherit override stops the rewrite reaching stdout", async (t) => {
+  const { directory, configDir, evidencePath } = await fixture(t);
+  const injectable = { ...contract, targets: { claude: { lanes: { terra: { model: "haiku", provenance: "user-local" } } } } };
+  const written = await writeSnapshot(configDir, "contracts", `${JSON.stringify(injectable)}\n`);
+  await writeFile(
+    join(configDir, ".orbitlane", "claude-report.json"),
+    `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: written.sha256 } })}\n`,
+    "utf8",
+  );
+
+  const result = await invoke({
+    configDir,
+    evidencePath,
+    payload: { tool_name: "Agent", tool_use_id: "inherit-1", tool_input: { subagent_type: "executor", prompt: "p" } },
+    cwd: directory,
+    env: { ...process.env, CLAUDE_CODE_SUBAGENT_MODEL: "inherit" },
+  });
+
+  assert.equal(result.code, 0);
+  // Nothing on stdout means no updatedInput: the call reaches the runtime untouched.
+  assert.equal(result.stdout.trim(), "");
+  const { readFile } = await import("node:fs/promises");
+  const heartbeat = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
+  assert.equal(heartbeat.reason, "ROUTED_MODEL_WITHHELD_INHERIT");
+  assert.equal(heartbeat.injected_model, null);
+});
+
 test("an unspecified model is rewritten to the routed model on stdout", async (t) => {
   const { directory, configDir, evidencePath } = await fixture(t);
   const injectable = { ...contract, targets: { claude: { lanes: { terra: { model: "haiku", provenance: "user-local" } } } } };

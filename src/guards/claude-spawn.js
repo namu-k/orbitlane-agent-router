@@ -46,8 +46,19 @@ export function evaluateClaudeAgentSpawn({ input, contract, runtimeDefaults }) {
       ? { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven" }
       : { exitCode: 0, decision: "allow", reason: "EXPLICIT_MODEL_RETAINED", effective_model: "unproven", declared_model: declared, routed_model: route.model });
   }
+  // `inherit` means opposite things across versions and the guard cannot tell them
+  // apart: from v2.1.196 it is the same as unset and resolution continues to the call,
+  // but before that it forced the main conversation's model and ignored the call
+  // outright. Injecting would therefore be silently dropped on an older runtime while
+  // the heartbeat claimed a route had been written. No version reaches the hook — the
+  // payload carries none and shelling out to read one would blow the latency budget —
+  // so withhold routing rather than record something that may not have happened.
+  // https://code.claude.com/docs/en/sub-agents#choose-a-model
+  if (input.environment_model === "inherit") {
+    return Object.freeze({ exitCode: 0, decision: "allow", reason: "ROUTED_MODEL_WITHHELD_INHERIT", effective_model: "unproven", routed_model: route.model });
+  }
   // No explicit model: this is the one point where the contract can still route, so
-  // fill the lane's model in. A model the Agent tool would reject is left alone —
+  // fill the lane's model in. A model outside the injectable allowlist is left alone —
   // breaking the spawn costs more than passing it through unrouted.
   if (!isInjectableClaudeModel(route.model)) {
     return Object.freeze({ exitCode: 0, decision: "allow", reason: "ROUTED_MODEL_NOT_INJECTABLE", effective_model: "unproven", routed_model: route.model });

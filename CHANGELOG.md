@@ -61,10 +61,17 @@ A 0.3.0 CLI can uninstall a guard that 0.2.0 installed.
   the agent types a stock Claude Code session actually spawns. The stable catalog
   names (`architect`, `executor`, …) describe a team shape and route nothing until
   agents by those exact names exist, because OrbitLane installs no agent definitions.
-- The Claude report marks each requested route `injectable`. Routing can only fill
-  in a model the Agent tool accepts, so a lane bound to a pinned full identifier is
-  projected as guidance but never written into a spawn. Pinned identifiers are
-  deliberately not mapped onto aliases, which would resolve to a different model.
+- The Claude report marks each requested route `injectable`. Routing fills in only
+  `sonnet`, `opus`, and `haiku` — OrbitLane's own allowlist, narrower than what the
+  runtime accepts, because injection changes what actually runs. A lane bound to
+  anything else, including a pinned full identifier, is projected as guidance and left
+  unrouted; a pinned identifier is never rewritten to an alias, which would resolve to
+  a different model.
+- Routing is withheld when `CLAUDE_CODE_SUBAGENT_MODEL` is `inherit`. From Claude Code
+  v2.1.196 that is the same as leaving it unset, but earlier versions forced the main
+  conversation's model and ignored the per-invocation parameter. No version reaches the
+  hook, so injecting could be dropped silently while the heartbeat claimed a route had
+  been written. An unset variable is unaffected and still routes.
 
 ### Fixed
 
