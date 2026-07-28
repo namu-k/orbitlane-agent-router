@@ -18,7 +18,7 @@
       "resolvedModel"
     ]
   },
-  "post_payload_version_key": "null",
+  "post_payload_version_key": null,
   "sanitization": {
     "fixed_tool_use_ids": true,
     "omitted_fields": [

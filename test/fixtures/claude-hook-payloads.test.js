@@ -15,7 +15,9 @@ test("live fixtures establish the foreground/background hook contract", async ()
   assert.equal(typeof foreground.tool_response.resolvedModel, "string");
   assert.equal(typeof foreground.tool_response.totalTokens, "number");
   assert.equal(typeof foreground.tool_response.usage, "object");
+  assert.notEqual(foreground.tool_response.usage, null);
+  assert.equal(Array.isArray(foreground.tool_response.usage), false);
   assert.equal(background.tool_name, "Agent");
   assert.equal(metadata.runtime_version, "2.1.220");
-  assert.ok(["string", "null"].includes(metadata.post_payload_version_key));
+  assert.equal(metadata.post_payload_version_key, null);
 });
