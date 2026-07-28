@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitlane.dev/schema/routing-telemetry-event.schema.json",
+  "title": "OrbitLane routing telemetry event",
+  "type": "object",
+  "required": ["schema", "schema_version", "event_id", "event_kind", "observed_at", "runtime", "scope", "links", "routing", "model_evidence", "usage", "provenance"],
+  "properties": {
+    "schema": { "const": "orbitlane.routing-telemetry" },
+    "schema_version": { "const": 1 },
+    "event_id": { "type": "string" },
+    "event_kind": { "enum": ["routing.decision", "execution.usage"] },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "runtime": { "type": "object" },
+    "scope": { "type": "object" },
+    "links": { "type": "object" },
+    "routing": {},
+    "model_evidence": { "type": "object" },
+    "usage": {},
+    "provenance": { "type": "object" }
+  },
+  "oneOf": [
+    { "properties": { "event_kind": { "const": "routing.decision" }, "routing": { "type": "object" }, "usage": { "type": "null" } } },
+    { "properties": { "event_kind": { "const": "execution.usage" }, "routing": { "type": "null" }, "usage": { "type": "object" } } }
+  ]
+}
