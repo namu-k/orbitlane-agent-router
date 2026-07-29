@@ -1,7 +1,8 @@
 import { auditInstalledRoles, claudeCapabilityMatrix, validateContractForTarget } from "../../schema/index.js";
 import { isInjectableClaudeModel } from "../../config/claude-models.js";
 import { resolveLaneModels } from "../../config/lanes.js";
-import { projectPolicy } from "../../policy/index.js";
+import { markerBoundedPolicy, projectPolicy } from "../../policy/index.js";
+import { projectedGuidanceProvenance } from "../../telemetry/identity.js";
 
 const CLAUDE_TIER1_CAPABILITIES = Object.freeze({
   requested_route: Object.freeze({ status: "configured", scope: "static-projection" }),
@@ -92,14 +93,17 @@ export function createClaudeTier1Adapter(contract, options) {
     runtime: options.runtime,
     supportsVersion: options.supportsVersion,
     render() {
+      const policy = projectPolicy({ target: "claude", contract, runtimeDefaults: options.runtimeDefaults });
+      const policyProvenance = projectedGuidanceProvenance(markerBoundedPolicy("claude", policy));
       return Object.freeze({
-        policy: projectPolicy({ target: "claude", contract, runtimeDefaults: options.runtimeDefaults }),
+        policy,
         settingsProjection: options.spawnGuardCommand === undefined ? undefined : Object.freeze({ command: options.spawnGuardCommand }),
         generated: `${JSON.stringify({
           adapter: "claude-code",
           tier: "tier1",
           schema_version: 2,
           contract_snapshot: { sha256: options.contractSha256 },
+          policy_provenance: policyProvenance,
           ...(options.runtimeDefaultsSha256 === undefined ? {} : { runtime_defaults_snapshot: { sha256: options.runtimeDefaultsSha256 } }),
           configuration_enforced: false,
           semantic_policy_audited: true,

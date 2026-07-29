@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createClaudeTier1Adapter, probeClaudeTier1Capabilities, resolveClaudeRequestedRoutes } from "../../src/adapters/claude/index.js";
+import { markerBoundedPolicy } from "../../src/policy/index.js";
+import { projectedGuidanceProvenance } from "../../src/telemetry/identity.js";
 
 const contract = Object.freeze({
   contract_version: "1.0.0",
@@ -180,6 +182,20 @@ test("projects stable Claude subagents and an honest Tier 1 report without trans
   });
   assert.deepEqual(generated.capabilities.claude_agent_pre_dispatch, { status: "unproven", scope: "Agent tool only" });
   assert.deepEqual(generated.capabilities.native_role_configuration, { status: "unproven", scope: "no-native-artifact-discovery" });
+});
+
+test("Claude report receipts exact marker-bounded policy bytes", () => {
+  const rendered = createClaudeTier1Adapter(contract, {
+    instructionPath: "/tmp/CLAUDE.md",
+    generatedPath: "/tmp/orbitlane-claude.json",
+    runtimeDefaults,
+  }).render();
+  const report = JSON.parse(rendered.generated);
+  const bounded = markerBoundedPolicy("claude", rendered.policy);
+
+  assert.equal(report.policy_provenance.projected_guidance_bytes, Buffer.byteLength(bounded, "utf8"));
+  assert.deepEqual(report.policy_provenance, projectedGuidanceProvenance(bounded));
+  assert.match(report.policy_provenance.policy_projection_sha256, /^[a-f0-9]{64}$/);
 });
 
 test("a roles-less install claims no native configuration and no enforcement", () => {
