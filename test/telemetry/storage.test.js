@@ -32,3 +32,15 @@ test("appendJsonl refuses symlinks and safely withdraws telemetry on write failu
   await mkdir(directory);
   assert.deepEqual(await appendJsonl(directory, { event_id: "two" }), { written: false });
 });
+
+test("read and append refuse a symlink in a nested ancestor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "orbitlane-telemetry-"));
+  const target = join(root, "target");
+  const linked = join(root, "linked");
+  await mkdir(target);
+  await symlink(target, linked);
+  const path = join(linked, "nested", "events.jsonl");
+
+  assert.deepEqual(await appendJsonl(path, { event_id: "one" }), { written: false });
+  await assert.rejects(readJsonl(path), /UNSAFE_TELEMETRY_PATH/);
+});

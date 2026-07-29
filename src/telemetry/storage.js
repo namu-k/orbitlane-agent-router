@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, parse, resolve } from "node:path";
 
 const FILE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
@@ -10,8 +10,25 @@ function assertCurrentOwner(info) {
   if (currentUid !== undefined && info.uid !== currentUid) throw new Error("UNSAFE_TELEMETRY_OWNER");
 }
 
+async function assertSafeAncestry(path, { create = false } = {}) {
+  const absolute = resolve(path);
+  const root = parse(absolute).root;
+  let current = root;
+  for (const segment of absolute.slice(root.length).split("/").filter(Boolean)) {
+    current = `${current}${current.endsWith("/") ? "" : "/"}${segment}`;
+    let info = await lstat(current).catch((error) => error.code === "ENOENT" ? null : Promise.reject(error));
+    if (!info && create) {
+      await mkdir(current, { mode: DIRECTORY_MODE });
+      info = await lstat(current);
+    }
+    if (!info) return false;
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
+  }
+  return true;
+}
+
 async function privateDirectory(path) {
-  await mkdir(path, { recursive: true, mode: DIRECTORY_MODE });
+  await assertSafeAncestry(path, { create: true });
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
   assertCurrentOwner(info);
@@ -50,6 +67,7 @@ export async function appendJsonl(path, event) {
 export async function readJsonl(path) {
   let content;
   try {
+    if (!await assertSafeAncestry(dirname(path))) return Object.freeze({ records: Object.freeze([]), corrupt_lines: Object.freeze([]), partial_last_line: false });
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
     assertCurrentOwner(info);

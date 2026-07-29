@@ -3,23 +3,36 @@
   "$id": "https://orbitlane.dev/schema/routing-telemetry-event.schema.json",
   "title": "OrbitLane routing telemetry event",
   "type": "object",
-  "required": ["schema", "schema_version", "event_id", "event_kind", "observed_at", "runtime", "scope", "links", "routing", "model_evidence", "usage", "provenance"],
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "event_id", "event_kind", "observed_at", "runtime", "scope", "links", "dedup_quality", "routing", "model_evidence", "usage", "provenance"],
   "properties": {
     "schema": { "const": "orbitlane.routing-telemetry" },
     "schema_version": { "const": 1 },
     "event_id": { "type": "string" },
     "event_kind": { "enum": ["routing.decision", "execution.usage"] },
     "observed_at": { "type": "string", "format": "date-time" },
-    "runtime": { "type": "object" },
-    "scope": { "type": "object" },
-    "links": { "type": "object" },
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "scope": { "$ref": "#/$defs/scope" },
+    "links": { "$ref": "#/$defs/links" },
+    "dedup_quality": { "enum": ["exact", "none"] },
     "routing": {},
-    "model_evidence": { "type": "object" },
+    "model_evidence": { "type": "object", "additionalProperties": false },
     "usage": {},
     "provenance": { "type": "object" }
   },
   "oneOf": [
-    { "properties": { "event_kind": { "const": "routing.decision" }, "routing": { "type": "object" }, "usage": { "type": "null" } } },
-    { "properties": { "event_kind": { "const": "execution.usage" }, "routing": { "type": "null" }, "usage": { "type": "object" } } }
-  ]
+    { "properties": { "event_kind": { "const": "routing.decision" }, "routing": { "$ref": "#/$defs/routing" }, "usage": { "type": "null" }, "provenance": { "$ref": "#/$defs/routingProvenance" } } },
+    { "properties": { "event_kind": { "const": "execution.usage" }, "routing": { "type": "null" }, "usage": { "$ref": "#/$defs/usage" }, "provenance": { "$ref": "#/$defs/executionProvenance" } } }
+  ],
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runtime": { "type": "object", "additionalProperties": false, "required": ["family", "surface", "version", "version_source", "version_observed_at", "version_freshness"], "properties": { "family": { "type": "string", "minLength": 1 }, "surface": { "type": "string", "minLength": 1 }, "version": { "type": ["string", "null"] }, "version_source": { "enum": ["hook-payload", "installer-probe", "unknown"] }, "version_observed_at": { "type": ["string", "null"], "format": "date-time" }, "version_freshness": { "enum": ["execution-attested", "install-snapshot", "unknown"] } } },
+    "scope": { "type": "object", "additionalProperties": false, "required": ["install_scope", "selected_scope", "collector_instance_ref", "contract_sha256", "resolver_policy_version"], "properties": { "install_scope": { "enum": ["project", "global"] }, "selected_scope": { "enum": ["project", "global", null] }, "collector_instance_ref": { "type": "string", "minLength": 1 }, "contract_sha256": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }, "resolver_policy_version": { "type": "integer" } } },
+    "links": { "type": "object", "additionalProperties": false, "required": ["session_ref", "turn_ref", "invocation_ref", "agent_ref", "quality"], "properties": { "session_ref": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }, "turn_ref": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }, "invocation_ref": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }, "agent_ref": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }, "quality": { "enum": ["exact", "none"] } } },
+    "routing": { "type": "object", "additionalProperties": false, "required": ["role_kind", "decision", "reason", "routing_outcome", "requested_model", "routed_model", "routed_model_class", "injected_model", "injected_model_class", "environment_override"], "properties": { "role_kind": { "enum": ["builtin", "custom"] }, "role_class": { "enum": ["architect", "critic", "executor", "team-executor", "verifier", "test-engineer", "explore"] }, "role_ref": { "$ref": "#/$defs/hash" }, "decision": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 }, "routing_outcome": { "enum": ["rewrite_emitted", "explicit_or_override_match", "explicit_model_retained", "rewrite_withheld", "outside_routing_scope", "denied_invalid_input", "denied_ambiguous_resolution", "denied_invalid_contract", "unknown_guard_outcome"] }, "requested_model": { "type": ["string", "null"] }, "routed_model": { "type": ["string", "null"] }, "routed_model_class": { "enum": ["sol", "terra", "luna", null] }, "injected_model": { "type": ["string", "null"] }, "injected_model_class": { "enum": ["sol", "terra", "luna", null] }, "environment_override": { "enum": ["unset", "inherit", "concrete", "unobserved"] } }, "oneOf": [{ "properties": { "role_kind": { "const": "builtin" }, "role_ref": false }, "required": ["role_class"] }, { "properties": { "role_kind": { "const": "custom" }, "role_class": false }, "required": ["role_ref"] }] },
+    "billingUnits": { "type": "object", "additionalProperties": false, "required": ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_write_5m_input_tokens", "cache_write_1h_input_tokens", "web_search_requests", "web_fetch_requests"], "properties": { "input_tokens": { "type": "integer", "minimum": 0 }, "output_tokens": { "type": "integer", "minimum": 0 }, "cache_read_input_tokens": { "type": "integer", "minimum": 0 }, "cache_write_5m_input_tokens": { "type": "integer", "minimum": 0 }, "cache_write_1h_input_tokens": { "type": "integer", "minimum": 0 }, "web_search_requests": { "type": "integer", "minimum": 0 }, "web_fetch_requests": { "type": "integer", "minimum": 0 } } },
+    "usage": { "type": "object", "additionalProperties": false, "required": ["final_input_model", "resolved_model", "total_tokens", "billing_units", "completion_mode"], "properties": { "final_input_model": { "type": "string", "minLength": 1 }, "resolved_model": { "type": "string", "minLength": 1 }, "total_tokens": { "type": "integer", "minimum": 0 }, "billing_units": { "$ref": "#/$defs/billingUnits" }, "completion_mode": { "enum": ["foreground", "async_launched", "unsupported"] }, "iteration_count": { "type": "integer", "minimum": 0 } } },
+    "routingProvenance": { "type": "object", "additionalProperties": false, "required": ["source", "limitations", "policy_projection_sha256", "projected_guidance_bytes"], "properties": { "source": { "type": "string", "minLength": 1 }, "limitations": { "type": "array", "items": { "type": "string" } }, "policy_projection_sha256": { "$ref": "#/$defs/hash" }, "projected_guidance_bytes": { "type": "integer", "minimum": 0 }, "truncated": { "type": "boolean" } } },
+    "executionProvenance": { "type": "object", "additionalProperties": false, "required": ["source", "limitations"], "properties": { "source": { "type": "string", "minLength": 1 }, "limitations": { "type": "array", "items": { "type": "string" } }, "truncated": { "type": "boolean" }, "policy_projection_sha256": false, "projected_guidance_bytes": false } }
+  }
 }

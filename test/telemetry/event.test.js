@@ -35,6 +35,7 @@ const routingInput = () => ({
     role_class: "executor",
     decision: "allow",
     reason: "ROUTED_MODEL_INJECTED",
+    routing_outcome: "rewrite_emitted",
     requested_model: null,
     routed_model: "sonnet",
     routed_model_class: "terra",
@@ -50,6 +51,46 @@ const routingInput = () => ({
     policy_projection_sha256: "e".repeat(64),
     projected_guidance_bytes: 64,
   },
+});
+
+const usageInput = () => ({
+  event_kind: "execution.usage",
+  observed_at: "2026-07-27T00:00:00.000Z",
+  runtime: {
+    family: "claude",
+    version: "2.1.220",
+    version_source: "hook-payload",
+    version_observed_at: "2026-07-27T00:00:00.000Z",
+    version_freshness: "execution-attested",
+    surface: "PostToolUse:Agent",
+  },
+  scope: {
+    install_scope: "project",
+    selected_scope: null,
+    collector_instance_ref: "collector-1",
+    contract_sha256: null,
+    resolver_policy_version: 1,
+  },
+  links: exactLinks,
+  routing: null,
+  model_evidence: {},
+  usage: {
+    final_input_model: "sonnet",
+    resolved_model: "sonnet",
+    total_tokens: 7,
+    billing_units: {
+      input_tokens: 1,
+      output_tokens: 2,
+      cache_read_input_tokens: 0,
+      cache_write_5m_input_tokens: 0,
+      cache_write_1h_input_tokens: 0,
+      web_search_requests: 0,
+      web_fetch_requests: 0,
+    },
+    completion_mode: "foreground",
+    iteration_count: 1,
+  },
+  provenance: { source: "runtime-hook", limitations: [] },
 });
 
 test("policy provenance and exact event IDs are deterministic", () => {
@@ -85,4 +126,30 @@ test("event constructors reject wrong kind-specific fields and truncate oversize
   });
   assert.ok(Buffer.byteLength(JSON.stringify(event), "utf8") < 4096);
   assert.equal(event.provenance.truncated, true);
+});
+
+test("routing decisions require normalized model outcome facts and canonical role handling", () => {
+  assert.throws(() => createEvent({ ...routingInput(), routing: { ...routingInput().routing, routing_outcome: undefined } }), /INVALID_TELEMETRY_EVENT/);
+  assert.throws(() => createEvent({ ...routingInput(), routing: { ...routingInput().routing, routing_outcome: "rewrite_withheld" } }), /INVALID_TELEMETRY_EVENT/);
+  assert.throws(() => createEvent({ ...routingInput(), routing: { ...routingInput().routing, role_class: "arbitrary-role" } }), /INVALID_TELEMETRY_EVENT/);
+
+  const custom = createEvent({
+    ...routingInput(),
+    routing: { ...routingInput().routing, role_kind: "custom", role_class: undefined, role_ref: "f".repeat(64) },
+  });
+  assert.equal(custom.routing.role_class, undefined);
+  assert.equal(custom.routing.role_ref, "f".repeat(64));
+});
+
+test("execution usage requires exactly the seven normalized billing units and no policy projection", () => {
+  assert.throws(() => createEvent({ ...usageInput(), usage: { ...usageInput().usage, billing_units: { input_tokens: 1 } } }), /INVALID_TELEMETRY_EVENT/);
+  assert.throws(() => createEvent({ ...usageInput(), provenance: { ...usageInput().provenance, policy_projection_sha256: "e".repeat(64), projected_guidance_bytes: 64 } }), /INVALID_TELEMETRY_EVENT/);
+  assert.deepEqual(createEvent(usageInput()).usage.billing_units, usageInput().usage.billing_units);
+});
+
+test("event construction allowlists telemetry facts and rejects raw or sensitive identifiers", () => {
+  const event = createEvent({ ...routingInput(), harmless_diagnostic: "discarded" });
+  assert.equal(event.harmless_diagnostic, undefined);
+  assert.throws(() => createEvent({ ...routingInput(), session_id: "raw-session" }), /INVALID_TELEMETRY_EVENT/);
+  assert.throws(() => createEvent({ ...routingInput(), provenance: { ...routingInput().provenance, prompt: "do not persist" } }), /INVALID_TELEMETRY_EVENT/);
 });

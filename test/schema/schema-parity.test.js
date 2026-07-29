@@ -60,3 +60,18 @@ test("capability-matrix.schema.json reasoning consts match the enforced capabili
     );
   }
 });
+
+test("telemetry schema is a closed kind-specific contract", async () => {
+  const telemetry = await schema("routing-telemetry-event.schema.json");
+  assert.equal(telemetry.additionalProperties, false);
+  assert.equal(telemetry.$defs.billingUnits.additionalProperties, false);
+  assert.deepEqual(telemetry.$defs.billingUnits.required, [
+    "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_write_5m_input_tokens",
+    "cache_write_1h_input_tokens", "web_search_requests", "web_fetch_requests",
+  ]);
+  const execution = telemetry.oneOf.find((branch) => branch.properties.event_kind.const === "execution.usage");
+  assert.equal(execution.properties.provenance.$ref, "#/$defs/executionProvenance");
+  assert.deepEqual(telemetry.$defs.executionProvenance.properties.policy_projection_sha256, false);
+  assert.deepEqual(telemetry.$defs.executionProvenance.properties.projected_guidance_bytes, false);
+  assert.ok(telemetry.$defs.routing.required.includes("routing_outcome"));
+});
