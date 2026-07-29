@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import test from "node:test";
 
 import { appendJsonl, readJsonl } from "../../src/telemetry/storage.js";
@@ -39,7 +39,7 @@ test("read and append refuse a symlink in a nested ancestor", async () => {
   const linked = join(root, "linked");
   await mkdir(target);
   await symlink(target, linked);
-  const path = join(linked, "nested", "events.jsonl");
+  const path = [linked, "nested", "events.jsonl"].join(sep);
 
   assert.deepEqual(await appendJsonl(path, { event_id: "one" }), { written: false });
   await assert.rejects(readJsonl(path), /UNSAFE_TELEMETRY_PATH/);

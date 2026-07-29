@@ -88,7 +88,8 @@ function validateRouting(event) {
     || !ROUTING_OUTCOMES.has(routing.routing_outcome)
     || !["unset", "inherit", "concrete", "unobserved"].includes(routing.environment_override)
     || !SHA256.test(provenance.policy_projection_sha256) || !Number.isInteger(provenance.projected_guidance_bytes)
-    || provenance.projected_guidance_bytes < 0 || !hasString(provenance.source) || !Array.isArray(provenance.limitations)) invalid();
+    || provenance.projected_guidance_bytes < 0 || !hasString(provenance.source) || !Array.isArray(provenance.limitations)
+    || !provenance.limitations.every(hasString)) invalid();
   if (routing.role_kind === "builtin" ? !BUILTIN_ROLE_CLASSES.has(routing.role_class) || routing.role_ref !== undefined : routing.role_kind !== "custom" || !SHA256.test(routing.role_ref) || routing.role_class !== undefined) invalid();
   for (const field of ["requested_model", "routed_model", "injected_model"]) {
     if (routing[field] !== null && !hasString(routing[field])) invalid();
@@ -107,7 +108,8 @@ function validateUsage(event) {
     || !hasString(usage.final_input_model) || !hasString(usage.resolved_model)
     || !Number.isInteger(usage.total_tokens) || usage.total_tokens < 0
     || !["foreground", "async_launched", "unsupported"].includes(usage.completion_mode)
-    || !hasString(provenance.source) || !Array.isArray(provenance.limitations)) invalid();
+    || !hasString(provenance.source) || !Array.isArray(provenance.limitations)
+    || !provenance.limitations.every(hasString)) invalid();
   if (usage.iteration_count !== undefined && (!Number.isInteger(usage.iteration_count) || usage.iteration_count < 0)) invalid();
   if (!isRecord(usage.billing_units) || Object.keys(usage.billing_units).length !== BILLING_UNITS.length) invalid();
   for (const unit of BILLING_UNITS) if (!Number.isInteger(usage.billing_units[unit]) || usage.billing_units[unit] < 0) invalid();
@@ -127,7 +129,9 @@ function envelope(input) {
     scope: { install_scope: scope?.install_scope, selected_scope: scope?.selected_scope, collector_instance_ref: scope?.collector_instance_ref, contract_sha256: scope?.contract_sha256, resolver_policy_version: scope?.resolver_policy_version },
     links: { session_ref: links?.session_ref, turn_ref: links?.turn_ref, invocation_ref: links?.invocation_ref, agent_ref: links?.agent_ref, quality: links?.quality },
     routing: input.event_kind === "routing.decision" ? {
-      role_kind: routing?.role_kind, role_class: routing?.role_class, role_ref: routing?.role_ref,
+      role_kind: routing?.role_kind,
+      ...(routing?.role_class === undefined ? {} : { role_class: routing.role_class }),
+      ...(routing?.role_ref === undefined ? {} : { role_ref: routing.role_ref }),
       decision: routing?.decision, reason: routing?.reason, routing_outcome: routing?.routing_outcome,
       requested_model: routing?.requested_model, routed_model: routing?.routed_model, routed_model_class: routing?.routed_model_class,
       injected_model: routing?.injected_model, injected_model_class: routing?.injected_model_class, environment_override: routing?.environment_override,
