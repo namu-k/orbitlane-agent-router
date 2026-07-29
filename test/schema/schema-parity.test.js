@@ -20,6 +20,8 @@ function typeMatches(type, value) {
   return ({ object: value !== null && typeof value === "object" && !Array.isArray(value), array: Array.isArray(value), string: typeof value === "string", integer: Number.isInteger(value), number: typeof value === "number", boolean: typeof value === "boolean", null: value === null })[type];
 }
 
+// This is deliberately a limited evaluator for the keywords used by these parity
+// cases, not a claim to provide general JSON Schema validation.
 function schemaMatches(schemaNode, value, root) {
   if (schemaNode === false) return false;
   if (schemaNode === true || !schemaNode) return true;
@@ -27,8 +29,8 @@ function schemaMatches(schemaNode, value, root) {
   if (schemaNode.const !== undefined && !Object.is(value, schemaNode.const)) return false;
   if (schemaNode.enum && !schemaNode.enum.some((candidate) => Object.is(candidate, value))) return false;
   if (schemaNode.type && !typeMatches(schemaNode.type, value)) return false;
-  if (schemaNode.pattern && (typeof value !== "string" || !(new RegExp(schemaNode.pattern)).test(value))) return false;
-  if (schemaNode.minLength !== undefined && (typeof value !== "string" || value.length < schemaNode.minLength)) return false;
+  if (schemaNode.pattern && typeof value === "string" && !(new RegExp(schemaNode.pattern)).test(value)) return false;
+  if (schemaNode.minLength !== undefined && typeof value === "string" && value.length < schemaNode.minLength) return false;
   if (schemaNode.minimum !== undefined && (typeof value !== "number" || value < schemaNode.minimum)) return false;
   if (schemaNode.required && (!value || schemaNode.required.some((key) => !Object.hasOwn(value, key)))) return false;
   if (schemaNode.properties && value && typeof value === "object" && !Array.isArray(value)) {
@@ -122,6 +124,42 @@ test("telemetry schema is a closed kind-specific contract", async () => {
   assert.deepEqual(telemetry.$defs.executionProvenance.properties.policy_projection_sha256, false);
   assert.deepEqual(telemetry.$defs.executionProvenance.properties.projected_guidance_bytes, false);
   assert.ok(telemetry.$defs.routing.required.includes("routing_outcome"));
+});
+
+test("telemetry schema couples identity fields to link quality and rejects empty nullable models", async () => {
+  const telemetry = await schema("routing-telemetry-event.schema.json");
+  const valid = createEvent(routingInput());
+  const validNone = createEvent({
+    ...routingInput(),
+    links: { session_ref: null, turn_ref: null, invocation_ref: null, agent_ref: null, quality: "none" },
+  });
+  assert.ok(schemaMatches(telemetry, valid, telemetry));
+  assert.ok(schemaMatches(telemetry, validNone, telemetry));
+
+  const invalidSchemaEvents = [
+    (event) => { event.dedup_quality = "none"; },
+    (event) => { event.event_id = "550e8400-e29b-41d4-a716-446655440000"; },
+    (event) => {
+      event.links = { session_ref: null, turn_ref: null, invocation_ref: null, agent_ref: null, quality: "none" };
+      event.dedup_quality = "none";
+      event.event_id = "a".repeat(64);
+    },
+    (event) => { event.routing.requested_model = ""; },
+    (event) => { event.routing.routed_model = ""; },
+    (event) => { event.routing.injected_model = ""; },
+  ];
+  for (const mutate of invalidSchemaEvents) {
+    const candidate = structuredClone(valid);
+    mutate(candidate);
+    assert.equal(schemaMatches(telemetry, candidate, telemetry), false);
+  }
+
+  for (const field of ["requested_model", "routed_model", "injected_model"]) {
+    assert.throws(
+      () => createEvent({ ...routingInput(), routing: { ...routingInput().routing, [field]: "" } }),
+      /INVALID_TELEMETRY_EVENT/,
+    );
+  }
 });
 
 test("telemetry schema and runtime validator reject the same cross-field violations", async () => {

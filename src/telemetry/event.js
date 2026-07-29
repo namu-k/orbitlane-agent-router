@@ -184,16 +184,19 @@ export function createEvent(input) {
     || (input.event_kind === "execution.usage" && input.routing !== null)
     || (input.event_kind === "execution.usage" && (Object.hasOwn(input.provenance ?? {}, "policy_projection_sha256") || Object.hasOwn(input.provenance ?? {}, "projected_guidance_bytes")))) invalid();
   rejectSensitive(input);
-  const event = envelope(input);
+  const event = {
+    ...envelope(input),
+    schema: "orbitlane.routing-telemetry",
+    schema_version: 1,
+    dedup_quality: input.links?.quality,
+    event_id: "",
+  };
   validateRuntime(event.runtime);
   validateScope(event.scope, event.event_kind);
   validateLinks(event.links);
   if (event.event_kind === "routing.decision") validateRouting(event);
   else validateUsage(event);
 
-  event.schema = "orbitlane.routing-telemetry";
-  event.schema_version = 1;
-  event.dedup_quality = event.links.quality;
   event.event_id = event.links.quality === "exact" ? eventId(event) : randomUUID();
   bounded(event);
   return deepFreeze(event);
