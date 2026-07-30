@@ -1,0 +1,41 @@
+{
+  "tool_name": "Agent",
+  "tool_use_id": "TOOL_USE_ID_FOREGROUND_ROUTE_APPLIED",
+  "tool_input": {
+    "model": "sonnet",
+    "run_in_background": false
+  },
+  "tool_response": {
+    "resolvedModel": "claude-sonnet-5",
+    "totalTokens": 20269,
+    "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 20264,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 3,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 20264
+      },
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 20264,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 20264,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  }
+}

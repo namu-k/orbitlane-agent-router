@@ -21,3 +21,16 @@ test("live fixtures establish the foreground/background hook contract", async ()
   assert.equal(metadata.runtime_version, "2.1.220");
   assert.equal(metadata.post_payload_version_key, null);
 });
+
+test("route-applied foreground fixture preserves the final non-empty Agent model", async () => {
+  const foreground = await read("claude-foreground-agent-route-applied-v2.1.220.json");
+  assert.equal(foreground.tool_name, "Agent");
+  assert.equal(foreground.tool_input.run_in_background, false);
+  assert.equal(typeof foreground.tool_input.model, "string");
+  assert.notEqual(foreground.tool_input.model.length, 0);
+  assert.equal(typeof foreground.tool_response.resolvedModel, "string");
+  assert.equal(typeof foreground.tool_response.totalTokens, "number");
+  assert.equal(typeof foreground.tool_response.usage, "object");
+  assert.notEqual(foreground.tool_response.usage, null);
+  assert.equal(Array.isArray(foreground.tool_response.usage), false);
+});
