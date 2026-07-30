@@ -69,10 +69,10 @@ test("a project Claude guard survives eviction of the package that installed it"
   assert.match(await heartbeat(projectRoot), /"reason":"EXPLICIT_MODEL_RETAINED"/);
 });
 
-test("the vendored PostToolUse observer survives eviction of the package that installed it", async (t) => {
+test("the vendored PostToolUse observer works from a config root with spaces after package eviction", async (t) => {
   const { directory, contractPath, env } = await isolated(t);
   const { cli, cache } = await ephemeralCli(directory);
-  const projectRoot = join(directory, "repo");
+  const projectRoot = join(directory, "repo with spaces 한글");
   const payload = JSON.parse(await readFile(join(packageRoot, "fixtures", "hook-payloads", "claude-foreground-agent-route-applied-v2.1.220.json"), "utf8"));
 
   assert.equal((await invoke(cli, ["install", "--target", "claude", "--config-root", projectRoot, "--contract", contractPath], { env })).code, 0);

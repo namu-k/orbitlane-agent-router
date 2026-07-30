@@ -1,5 +1,6 @@
 import { appendJsonl } from "../telemetry/storage.js";
 import { createEvent } from "../telemetry/event.js";
+import { fileURLToPath } from "node:url";
 
 const BILLING_UNITS = Object.freeze([
   "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_write_5m_input_tokens",
@@ -40,7 +41,7 @@ function usageFrom(payload) {
   });
 }
 
-export async function observeClaudeUsage({ payload, installedScope, collectorInstanceRef, telemetryRoot, appendTelemetry } = {}) {
+export async function observeClaudeUsage({ payload, installedScope, collectorInstanceRef, telemetryRoot, appendTelemetry, createTelemetryEvent = createEvent, reportDiagnostic } = {}) {
   const usage = usageFrom(payload);
   if (usage === null || !["project", "global"].includes(installedScope) || !nonEmptyString(collectorInstanceRef)) {
     return Object.freeze({ observed: false, telemetry_recorded: false });
@@ -48,7 +49,7 @@ export async function observeClaudeUsage({ payload, installedScope, collectorIns
 
   let event;
   try {
-    event = createEvent({
+    event = createTelemetryEvent({
       event_kind: "execution.usage",
       observed_at: new Date().toISOString(),
       runtime: {
@@ -66,7 +67,8 @@ export async function observeClaudeUsage({ payload, installedScope, collectorIns
       provenance: { source: "runtime-hook", limitations: ["link-identifiers-unavailable"] },
     });
   } catch {
-    return Object.freeze({ observed: false, telemetry_recorded: false });
+    try { reportDiagnostic?.("TELEMETRY_EVENT_CREATION_FAILED"); } catch {}
+    return Object.freeze({ observed: true, telemetry_recorded: false });
   }
 
   try {
@@ -95,7 +97,10 @@ async function main() {
   const [telemetryRoot, installedScope, collectorInstanceRef] = process.argv.slice(2).map(decodeArgument);
   let payload;
   try { payload = JSON.parse(await readStdin()); } catch { return; }
-  await observeClaudeUsage({ payload, telemetryRoot, installedScope, collectorInstanceRef });
+  await observeClaudeUsage({
+    payload, telemetryRoot, installedScope, collectorInstanceRef,
+    reportDiagnostic: (diagnostic) => process.stderr.write(`${diagnostic}\n`),
+  });
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) await main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

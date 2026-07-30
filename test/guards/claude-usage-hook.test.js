@@ -6,12 +6,13 @@ import { observeClaudeUsage } from "../../src/guards/claude-usage-hook.js";
 
 const fixture = (name) => readFile(new URL(`../../fixtures/hook-payloads/${name}`, import.meta.url), "utf8").then(JSON.parse);
 
-const observe = (payload, appendTelemetry = async () => {}) => observeClaudeUsage({
+const observe = (payload, appendTelemetry = async () => {}, options = {}) => observeClaudeUsage({
   payload,
   installedScope: "project",
   collectorInstanceRef: "collector-1",
   telemetryRoot: "/does-not-exist/report-free",
   appendTelemetry,
+  ...options,
 });
 
 test("Post observer records route-applied foreground usage without contract reads", async () => {
@@ -70,6 +71,19 @@ test("Post observer does not append async, malformed, or incomplete payloads", a
 test("Post observer safely reports append failure", async () => {
   const result = await observe(await fixture("claude-foreground-agent-route-applied-v2.1.220.json"), async () => { throw new Error("append failed"); });
   assert.deepEqual(result, { observed: true, telemetry_recorded: false });
+});
+
+test("Post observer retains a valid observation when event creation fails", async () => {
+  const diagnostics = [];
+  const result = await observe(await fixture("claude-foreground-agent-route-applied-v2.1.220.json"), async () => {
+    assert.fail("event creation failure must not append telemetry");
+  }, {
+    createTelemetryEvent: () => { throw new Error("payload content must not appear in the diagnostic"); },
+    reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  assert.deepEqual(result, { observed: true, telemetry_recorded: false });
+  assert.deepEqual(diagnostics, ["TELEMETRY_EVENT_CREATION_FAILED"]);
 });
 
 test("Post observer has no contract, report, resolver, or subprocess dependency", async () => {
