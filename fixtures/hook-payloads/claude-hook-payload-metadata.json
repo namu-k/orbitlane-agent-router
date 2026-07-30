@@ -18,9 +18,23 @@
       "resolvedModel"
     ]
   },
+  "route_applied_foreground_capture": {
+    "fixture": "claude-foreground-agent-route-applied-v2.1.220.json",
+    "runtime_version": "2.1.220",
+    "hook_event_name": "PostToolUse",
+    "completion_mode": "foreground",
+    "run_in_background": false,
+    "model_source": "isolated-guard-rewrite",
+    "caller_specified_model": false,
+    "guard_injected_model": "sonnet"
+  },
   "post_payload_version_key": null,
   "sanitization": {
-    "fixed_tool_use_ids": true,
+    "fixed_tool_use_ids": {
+      "foreground": "TOOL_USE_ID_FOREGROUND",
+      "background": "TOOL_USE_ID_BACKGROUND",
+      "route_applied_foreground": "TOOL_USE_ID_FOREGROUND_ROUTE_APPLIED"
+    },
     "omitted_fields": [
       "session_id",
       "transcript_path",
