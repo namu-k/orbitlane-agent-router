@@ -29,6 +29,14 @@ async function spawnAgent(root, model, scope) {
   try { const { stdout, stderr } = await child; return { code: 0, stdout, stderr }; } catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
 }
 
+async function observeUsage(root, payload, scope) {
+  const telemetryPath = join(root, ".orbitlane", "execution-usage.v1.jsonl");
+  const args = [join(root, ".orbitlane", "hook", "guards", "claude-usage-hook.js"), telemetryPath, scope, "collector-1"];
+  const child = execFileAsync(process.execPath, args, { cwd: root, encoding: "utf8" });
+  child.child.stdin.end(JSON.stringify(payload));
+  try { const { stdout, stderr } = await child; return { code: 0, stdout, stderr, telemetryPath }; } catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr, telemetryPath }; }
+}
+
 // The vendored hook no longer proves it resolved a contract by denying, so the
 // heartbeat is what shows the copied runtime read the contract and routed the role.
 async function heartbeat(root) {
@@ -59,6 +67,22 @@ test("a project Claude guard survives eviction of the package that installed it"
   assert.equal((await spawnAgent(projectRoot, "claude-terra", "project")).code, 0);
   assert.equal((await spawnAgent(projectRoot, "other-model", "project")).code, 0);
   assert.match(await heartbeat(projectRoot), /"reason":"EXPLICIT_MODEL_RETAINED"/);
+});
+
+test("the vendored PostToolUse observer survives eviction of the package that installed it", async (t) => {
+  const { directory, contractPath, env } = await isolated(t);
+  const { cli, cache } = await ephemeralCli(directory);
+  const projectRoot = join(directory, "repo");
+  const payload = JSON.parse(await readFile(join(packageRoot, "fixtures", "hook-payloads", "claude-foreground-agent-route-applied-v2.1.220.json"), "utf8"));
+
+  assert.equal((await invoke(cli, ["install", "--target", "claude", "--config-root", projectRoot, "--contract", contractPath], { env })).code, 0);
+  await rm(cache, { recursive: true, force: true });
+
+  const result = await observeUsage(projectRoot, payload, "project");
+  assert.equal(result.code, 0);
+  const [event] = (await readFile(result.telemetryPath, "utf8")).trim().split("\n").map(JSON.parse);
+  assert.equal(event.event_kind, "execution.usage");
+  assert.equal(event.usage.resolved_model, "claude-sonnet-5");
 });
 
 test("the vendored runtime declares its own module scope", async (t) => {

@@ -18,8 +18,8 @@ const targets = new Set(["codex", "claude", "both"]);
 // The installed hook must keep working after the package that installed it is gone,
 // which is the normal end state for npx and dlx. Rather than storing an absolute path
 // into an evictable cache, install copies the runtime next to the report it reads.
-function vendoredHookPath(root) {
-  const path = join(root, ".orbitlane", "hook", "guards", "claude-spawn-hook.js");
+function vendoredHookPath(root, filename = "claude-spawn-hook.js") {
+  const path = join(root, ".orbitlane", "hook", "guards", filename);
   // node has to receive this as a real path, so unlike the other guard arguments it
   // cannot be base64. POSIX single quoting makes any byte literal, but cmd expands
   // %VAR% even inside double quotes, so such a path could never launch correctly.
@@ -35,6 +35,10 @@ async function vendorHookRuntime(root) {
   const retired = join(root, ".orbitlane", `.hook-retired-${randomUUID()}`);
   try {
     await cp(join(PACKAGE_ROOT, "src"), staged, { recursive: true });
+    // Both hook entrypoints are vendored together even before the installer owns the
+    // PostToolUse setting. This keeps the observer executable after an npx cache is
+    // evicted without prematurely registering a second hook tuple (Task 4 owns that).
+    await Promise.all(["claude-spawn-hook.js", "claude-usage-hook.js"].map((filename) => realpath(join(staged, "guards", filename))));
     // The copy leaves the package's module scope behind. Without this the nearest
     // ancestor package.json decides the module type, and in a project that declares
     // CommonJS every import in the hook would fail.
