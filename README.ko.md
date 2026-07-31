@@ -8,6 +8,8 @@
 
 OrbitLane은 하나의 라우팅 contract를 Codex/OMX와 Claude Code의 네이티브 guidance로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 contract 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 roles를 선언한 contract에만 적용되는 Claude Code scoped spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 
+인접한 도구들과 구분되는 지점은 두 가지입니다. 첫째, **런타임을 가로지릅니다**. 하나의 contract가 Codex/OMX와 Claude Code 양쪽을 대상으로 하며, 특정 벤더 전용 hook이 아닙니다. 둘째, 프롬프트 복잡도를 추론한 점수가 아니라 **선언된 role 식별자**로 라우팅합니다. 이 식별자는 런타임이 spawn에 붙인 이름과 그대로 대조되며, 명시적으로 지명된 skill이나 model은 router가 양보하고 divergence로 기록하는 결정입니다.
+
 OrbitLane은 LLM API 트래픽을 중계하지 않습니다. 아키텍처, 구현, 검증, 저장소 조회 같은 **에이전트 역할과 작업 분류**를 사용자가 선택한 모델 lane에 연결합니다.
 
 ## 왜 OrbitLane인가요?
@@ -23,6 +25,44 @@ OrbitLane은 라우팅 정책을 명시적이고 이식 가능하게 만듭니�
 - 선언된 roles는 검사하며 contract에 선언되지 않은 runtime role은 unmanaged로 통과합니다.
 - configuration 적용과 runtime enforcement를 분리해 감사합니다.
 - 지원되지 않는 capability는 성공으로 가장하지 않고 `false` 또는 `unproven`으로 보고합니다.
+
+## rulesync·claude-model-router-hook·LLM router와의 차이
+
+OrbitLane 옆에는 혼동하기 쉬운 세 부류의 도구가 있습니다. 무엇을 입력으로 받는지, 무엇을
+바꾸는지, 그리고 애초에 요청 경로에 들어가는지가 서로 다릅니다.
+
+| 분류 | 대표 프로젝트 | 하는 일 | OrbitLane의 차이 |
+| --- | --- | --- | --- |
+| Instruction·설정 동기화 | [rulesync](https://github.com/dyoshikawa/rulesync), [ruler](https://github.com/intellectronica/ruler) | 하나의 규칙 소스를 30~40개 에이전트의 네이티브 instruction·MCP·ignore 파일(rulesync는 subagent 파일까지)로 생성 | "한 번 정의해 여러 곳으로 컴파일"이라는 형태는 같지만 payload가 다릅니다. OrbitLane의 contract가 담는 것은 instruction 산문이 아니라 role → lane → model 라우팅 정책과 정적 drift 감사입니다. 모델 선택이 부수 효과가 아니라 주제입니다 |
+| Claude Code 라우팅 hook | [claude-model-router-hook](https://github.com/tzachbon/claude-model-router-hook) | 프롬프트마다 복잡도를 분류하고, 범용 spawn을 routed agent 변형으로 다시 쓰며, 선택적으로 권장 model을 `settings.json`에 기록 | Claude 전용이 아니라 런타임을 가로지릅니다. 휴리스틱 복잡도 분류기 대신 선언된 role 이름을 그대로 대조하고, 메인 세션 model이나 사용자의 model 선택은 절대 다시 쓰지 않으며, model을 지정하지 않은 spawn만 채웁니다 |
+| 요청 경로 router·gateway | [claude-code-router](https://github.com/musistudio/claude-code-router), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), [RouteLLM](https://github.com/lm-sys/RouteLLM), [semantic-router](https://github.com/vllm-project/semantic-router) | 에이전트와 provider 사이에 로컬 gateway 또는 serving 계층 router로 자리 잡고 요청 단위로 결정 | OrbitLane은 설정 시점에 동작하는 컴파일러입니다. proxy도, endpoint도, provider credential도, 트래픽도 없습니다. 프롬프트를 아예 보지 않습니다 |
+
+2026-07-31 기준으로 확인했습니다. 그 시점까지, 하나의 vendor-neutral 라우팅 contract를
+non-Anthropic 런타임과 Claude Code 양쪽으로 컴파일하고 그 결과를 정적으로 감사하는
+프로젝트는 찾지 못했습니다. 알고 계신 사례가 있다면 issue를 열어주세요. 반박되지 않은
+비교표보다 교정된 비교표가 더 쓸모 있습니다.
+
+### 이 자리가 비어 있는 이유일 수 있는 것
+
+빈자리가 곧 기회는 아닙니다. 경쟁 가설은 "런타임마다 model 지정 방식이 충분히 달라서 contract
+추상화가 얇아지는 지점에서 깨진다"입니다. 우리 측정 결과로는 부분적으로 사실이며, 설계는 그
+사실에 맞서기보다 그것을 전제로 짜여 있습니다.
+
+추상화는 **guidance 계층에서 유지됩니다**. 두 런타임 모두 전역과 프로젝트 instruction 파일을
+병합하므로, 하나의 contract가 어느 target에서든 동일한 네 줄 kernel로 렌더링되고 model 해석도
+같은 lane 테이블을 지납니다.
+
+추상화가 **얇아지는 곳은 injection 계층**입니다. 여기서는 재작성이 특정 런타임의 정확한 호출
+형태와 맞아야 합니다. `CLAUDE_CODE_SUBAGENT_MODEL`은 호출별 `model`보다 우선합니다. `inherit`는
+Claude Code v2.1.196부터 "미지정과 동일"이지만 그 이전에는 "메인 model 강제"였고, 버전 정보는
+hook까지 오지 않습니다. Codex는 표면끼리도 서로 다릅니다. 네이티브 위임은 model 없이 spawn하는
+반면, skill fan-out은 `codex-cli 0.145.0`에서 모든 `spawn_agent` 호출에 `model`을 실어 보내는
+것이 관측되었습니다. 하나의 호출 형태로 런타임 하나도 다 설명되지 않는데, 둘은 더더욱 아닙니다.
+
+그래서 OrbitLane은 추상화가 균일한 척하지 않습니다. 도달 범위가 다른 두 메커니즘 — guidance는
+어디에나, injection은 호출 형태를 아는 곳에만 — 과 둘 중 무엇인지 밝히는 enforcement tier
+어휘를 함께 제공합니다. 요청을 다시 쓰는 것이 실행된 것을 관측하지는 않으므로
+`effective_model`은 계속 `unproven`입니다. 이 분리는 제품의 한계가 아니라 제품 그 자체입니다.
 
 ## 빠른 시작
 
@@ -165,7 +205,7 @@ Guard는 role 이름을 runtime이 spawn에 붙인 식별자와 그대로, 대�
 
 ```text
 - Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete.
-- Keep judgment that needs full context, discipline, or confidentiality in the main session. A delegate that meets a new consequential judgment outside its assigned scope stops and asks the main session to decide.
+- Delegates settle reversible implementation choices inside assigned scope. Return only decisions that change the approved scope or a public contract, affect data or safety, require new authority, or trigger irreversible/external actions.
 - When delegating, use: execution -> sonnet, bounded lookup -> haiku, delegated verification and analysis -> opus.
 - Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.
 ```
@@ -282,9 +322,17 @@ v1에는 telemetry를 넣지 않을 계획입니다.
 
 지원되는 모든 spawn 경로에 대해 trusted dispatch interception과 effective-model metadata를 제공하는 미래의 Tier 2 adapter에서만 보장할 수 있습니다. 그 외에는 effective model을 `unproven`으로 보고합니다.
 
+### rulesync나 ruler와는 무엇이 다른가요?
+
+그쪽은 하나의 instruction 소스를 여러 에이전트에 배포하고, OrbitLane은 하나의 라우팅 정책을 두 런타임에 배포합니다. "한 번 정의해 컴파일"이라는 형태는 같지만 payload는 다릅니다. rulesync와 ruler는 규칙·MCP 서버·ignore 파일을 동기화하고, OrbitLane의 contract는 어떤 model lane이 어떤 역할을 수행할지를 다루며 설치된 결과의 drift를 감사합니다. 둘을 함께 쓰는 것도 합리적입니다. 같은 instruction 파일 안에서 서로 다른 block을 소유하기 때문입니다.
+
+### claude-model-router-hook과는 무엇이 다른가요?
+
+둘 다 Claude Code subagent spawn을 다시 쓸 수 있고, 닮은 점은 거기까지입니다. claude-model-router-hook은 휴리스틱 우선 분류기로 프롬프트마다 복잡도를 분류하고, 새 세션을 위해 권장 model을 `settings.json`에 기록할 수도 있습니다. OrbitLane에는 분류기가 없습니다. 런타임이 붙인 agent 식별자를 사용자가 선언한 role과 대조하고, model을 지정하지 않은 spawn만 건드리며, 메인 세션 model은 바꾸지 않고, 같은 contract를 Codex/OMX용으로도 컴파일합니다. Claude Code에서 프롬프트 단위 적응을 원한다면 분류기를, 두 런타임에 걸친 하나의 명시적이고 감사 가능한 정책을 원한다면 OrbitLane을 선택하세요.
+
 ### OrbitLane은 LLM gateway 또는 API proxy인가요?
 
-아닙니다. OrbitLane은 코딩 에이전트 역할과 runtime adapter를 설정합니다. Model provider 사이의 network request를 중계하지 않습니다.
+아닙니다. OrbitLane은 코딩 에이전트 역할과 runtime adapter를 설정합니다. Model provider 사이의 network request를 중계하지 않습니다. claude-code-router, CLIProxyAPI, RouteLLM, semantic-router 같은 도구는 요청 경로에서 동작하며 provider credential이 필요하지만, OrbitLane은 설정 시점에 동작하고 credential을 보유하지 않으며 프롬프트를 보지 않습니다.
 
 ### OrbitLane은 WSL에 종속되나요?
 
@@ -315,6 +363,6 @@ OrbitLane v0.3.0은 npm 공개를 기다리는 출시 준비 상태입니다: co
 
 첫 공개 release에 권장하는 GitHub topics는 다음과 같습니다.
 
-`ai-agents`, `coding-agents`, `model-routing`, `subagents`, `codex`, `claude-code`, `opencode`, `developer-tools`, `nodejs`, `cli`
+`ai-agents`, `coding-agents`, `model-routing`, `llm-routing`, `subagents`, `codex`, `claude-code`, `claude-code-hooks`, `agents-md`, `opencode`, `developer-tools`, `nodejs`, `cli`
 
 이 README는 프로젝트가 무엇을 하고 왜 유용한지, 어떻게 시작하는지를 설명하라는 GitHub 지침을 따릅니다. [About repository READMEs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes)와 [Repository topics](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/classifying-your-repository-with-topics)를 참고하세요.

@@ -8,6 +8,8 @@
 
 OrbitLane is an open-source **routing contract compiler** that compiles one routing contract into runtime-native guidance for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and an opt-in Claude Code-scoped spawn guard for contracts that declare roles. A general-purpose runtime model router is the Tier 2 roadmap.
 
+Two properties separate it from adjacent tooling. It is **cross-runtime**: one contract targets Codex/OMX and Claude Code, rather than being a hook for a single vendor. And it routes on **declared role identity**, matched verbatim against the runtime's own agent identifier, rather than on an inferred prompt-complexity score — an explicitly named skill or an explicitly chosen model is a decision the router yields to and records as a divergence.
+
 OrbitLane does not proxy LLM API traffic. It routes **agent roles and task classes**—such as architecture, implementation, verification, and repository lookup—to user-selected model lanes.
 
 ## Why OrbitLane?
@@ -23,6 +25,44 @@ OrbitLane makes the routing policy explicit and portable:
 - Declared roles are checked; runtime roles not declared in the contract pass through as unmanaged.
 - Audit configuration separately from runtime enforcement.
 - Report unsupported capabilities as `false` or `unproven`, never as implied success.
+
+## How OrbitLane compares to rulesync, claude-model-router-hook, and LLM routers
+
+Three families of tool sit next to OrbitLane and are easy to confuse with it. They differ in
+what they take as input, what they change, and whether they are in the request path at all.
+
+| Category | Representative projects | What they do | How OrbitLane differs |
+| --- | --- | --- | --- |
+| Instruction and config sync | [rulesync](https://github.com/dyoshikawa/rulesync), [ruler](https://github.com/intellectronica/ruler) | Compile one rule source into 30–40 agents' native instruction, MCP, ignore, and (rulesync) subagent files | Same compile-once shape, different payload. OrbitLane's contract carries a role → lane → model routing policy and a static drift audit, not instruction prose. Model choice is the subject, not a side effect |
+| Claude Code routing hooks | [claude-model-router-hook](https://github.com/tzachbon/claude-model-router-hook) | Classify each prompt's complexity, rewrite generic spawns to routed agent variants, and optionally write a recommended model into `settings.json` | Cross-runtime rather than Claude-only. Routes declared role names verbatim instead of a heuristic complexity classifier, never rewrites the main-session model or the user's model choice, and fills in only spawns that named no model |
+| Request-path routers and gateways | [claude-code-router](https://github.com/musistudio/claude-code-router), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), [RouteLLM](https://github.com/lm-sys/RouteLLM), [semantic-router](https://github.com/vllm-project/semantic-router) | Sit between the agent and providers as a local gateway or serving-layer router, deciding per request | OrbitLane is a configuration-time compiler. No proxy, no endpoint, no provider credentials, no traffic. It never sees a prompt |
+
+Checked 2026-07-31. As of that date we found no project that compiles one vendor-neutral
+routing contract into both a non-Anthropic runtime and Claude Code and then statically audits
+the result. If you know one, please open an issue — a corrected comparison is more useful than
+an uncontested one.
+
+### Why this slot may have stayed empty
+
+An empty slot is not automatically an opportunity. The competing explanation is that per-runtime
+model designation differs enough that a contract abstraction breaks once it gets thin. Our own
+measurements say that is partly true, and the design is shaped around it rather than against it.
+
+The abstraction **holds at the guidance layer**. Both runtimes merge global and project
+instruction files, so one contract renders the same four-line kernel for either target, and both
+resolve models through the same lane table.
+
+It **thins at the injection layer**, where a rewrite has to match one runtime's exact call shape.
+`CLAUDE_CODE_SUBAGENT_MODEL` outranks the per-call `model`. `inherit` means "same as unset" from
+Claude Code v2.1.196 and "force the main model" before it, and no version reaches the hook. Codex
+surfaces disagree with each other: native delegation spawns without a model, while skill fan-out
+was observed passing `model` on every `spawn_agent` call on `codex-cli 0.145.0`. No single call
+shape describes one runtime, let alone two.
+
+So OrbitLane does not pretend the abstraction is uniform. It ships two mechanisms with different
+reach — guidance everywhere, injection only where a call shape is known — and an enforcement tier
+vocabulary that states which is which. `effective_model` stays `unproven` because rewriting a
+request does not observe what ran. That separation is the product, not a limitation of it.
 
 ## Quick start
 
@@ -177,7 +217,7 @@ is exactly these four English lines:
 
 ```text
 - Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete.
-- Keep judgment that needs full context, discipline, or confidentiality in the main session. A delegate that meets a new consequential judgment outside its assigned scope stops and asks the main session to decide.
+- Delegates settle reversible implementation choices inside assigned scope. Return only decisions that change the approved scope or a public contract, affect data or safety, require new authority, or trigger irreversible/external actions.
 - When delegating, use: execution -> sonnet, bounded lookup -> haiku, delegated verification and analysis -> opus.
 - Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.
 ```
@@ -294,9 +334,17 @@ Yes. Tier 1 provides deterministic configuration generation, semantic policy aud
 
 Only in a future Tier 2 adapter where the runtime provides trusted dispatch interception and effective-model metadata for every supported spawn path. Otherwise OrbitLane reports the effective model as `unproven`.
 
+### How is OrbitLane different from rulesync or ruler?
+
+They distribute one instruction source to many agents; OrbitLane distributes one routing policy to two runtimes. The compile-once shape is shared, the payload is not: rulesync and ruler synchronise rules, MCP servers, and ignore files, while OrbitLane's contract is about which model lane runs which role, and it audits the installed result for drift. Running both together is reasonable — they own different blocks of the same instruction files.
+
+### How is OrbitLane different from claude-model-router-hook?
+
+Both can rewrite a Claude Code subagent spawn, and there the resemblance ends. claude-model-router-hook classifies each prompt's complexity with a heuristics-first classifier and can also write a recommended model into `settings.json` for new sessions. OrbitLane runs no classifier: it matches the runtime's own agent identifier against roles you declared, touches only spawns that named no model, never changes the main-session model, and compiles the same contract for Codex/OMX as well. Choose the classifier if you want per-prompt adaptation on Claude Code; choose OrbitLane if you want one explicit, auditable policy across two runtimes.
+
 ### Is OrbitLane an LLM gateway or API proxy?
 
-No. OrbitLane configures coding-agent roles and runtime adapters. It does not route network requests between model providers.
+No. OrbitLane configures coding-agent roles and runtime adapters. It does not route network requests between model providers. Tools such as claude-code-router, CLIProxyAPI, RouteLLM, and semantic-router operate in the request path and need provider credentials; OrbitLane runs at configuration time, holds no credentials, and never sees a prompt.
 
 ### Is OrbitLane tied to WSL?
 
@@ -327,6 +375,6 @@ OrbitLane v0.3.0 is prepared for release with npm publication pending: contract 
 
 Recommended GitHub topics for the first public release:
 
-`ai-agents`, `coding-agents`, `model-routing`, `subagents`, `codex`, `claude-code`, `opencode`, `developer-tools`, `nodejs`, `cli`
+`ai-agents`, `coding-agents`, `model-routing`, `llm-routing`, `subagents`, `codex`, `claude-code`, `claude-code-hooks`, `agents-md`, `opencode`, `developer-tools`, `nodejs`, `cli`
 
 The README follows GitHub's guidance to explain what a project does, why it is useful, and how users get started. See [About repository READMEs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes) and [Repository topics](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/classifying-your-repository-with-topics).
