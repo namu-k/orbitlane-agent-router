@@ -81,9 +81,15 @@ export function createClaudeTier1Adapter(contract, options) {
       ...probedCapabilities,
       native_role_configuration: Object.freeze({ status: "not-applicable", scope: "roles-omitted" }),
     });
+  const hookTuples = options.spawnGuardCommand === undefined
+    ? Object.freeze([])
+    : Object.freeze([
+      Object.freeze({ event: "PreToolUse", matcher: "Agent", command: options.spawnGuardCommand, installed_scope: options.installedScope }),
+      Object.freeze({ event: "PostToolUse", matcher: "Agent", command: options.usageObserverCommand, installed_scope: options.installedScope }),
+    ]);
   const settingsProjection = options.spawnGuardCommand === undefined
     ? Object.freeze({ hooks: Object.freeze({}) })
-    : Object.freeze({ hooks: Object.freeze({ PreToolUse: Object.freeze([{ matcher: "Agent", hooks: Object.freeze([{ type: "command", command: options.spawnGuardCommand }]) }]) }) });
+    : Object.freeze({ hooks: Object.freeze(Object.groupBy(hookTuples, ({ event }) => event)) });
 
   return Object.freeze({
     instructionPath: options.instructionPath,
@@ -98,7 +104,7 @@ export function createClaudeTier1Adapter(contract, options) {
       const policyProvenance = projectedGuidanceProvenance(markerBoundedPolicy("claude", policy));
       return Object.freeze({
         policy,
-        settingsProjection: options.spawnGuardCommand === undefined ? undefined : Object.freeze({ command: options.spawnGuardCommand }),
+        settingsProjection: options.spawnGuardCommand === undefined ? undefined : Object.freeze({ hooks: hookTuples }),
         generated: `${JSON.stringify({
           adapter: "claude-code",
           tier: "tier1",
@@ -126,7 +132,23 @@ export function createClaudeTier1Adapter(contract, options) {
           ...(options.spawnGuardCommand === undefined ? {} : { settings_projection: { ...settingsProjection, guard_command: options.spawnGuardCommand } }),
           receipt: options.spawnGuardCommand === undefined
             ? { version: 1, install_shape: "guidance-only" }
-            : { version: 1, install_shape: "claude-managed-role-guard", guard_command: options.spawnGuardCommand },
+            : {
+              version: 2,
+              // Compatibility aliases are descriptive only; ownership is the exact
+              // tuple array above and never falls back to this single command.
+              install_shape: "claude-managed-role-guard",
+              guard_command: options.spawnGuardCommand,
+              hooks: hookTuples,
+              policy_projection_sha256: policyProvenance.policy_projection_sha256,
+              projected_guidance_bytes: policyProvenance.projected_guidance_bytes,
+              telemetry_root: options.telemetryRoot,
+              collector_instance_ref: options.collectorInstanceRef,
+              runtime_version_snapshot: options.runtimeVersionSnapshot,
+              owned_files: options.ownedFiles ?? [],
+              secret_paths: options.secretPaths ?? [],
+              evidence_roots: options.evidenceRoots ?? [],
+              migration: options.migration,
+            },
           audit,
           capabilities,
           enforcement_scope: hasRoles ? "scoped-request-check" : "none (roles omitted)",

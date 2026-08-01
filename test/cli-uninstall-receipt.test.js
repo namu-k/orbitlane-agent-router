@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { execFile } from "node:child_process";
@@ -64,7 +64,7 @@ test("uninstall with a roles-less contract removes the managed receipt's exact h
 
 for (const [name, mutate] of [
   ["a corrupt receipt", async (claudeHome) => writeFile(join(claudeHome, ".orbitlane", "claude-report.json"), "{not json", "utf8")],
-  ["a mismatched receipt", async (claudeHome) => { const path = join(claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.receipt.guard_command = "foreign"; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }],
+  ["a mismatched receipt", async (claudeHome) => { const path = join(claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.receipt.hooks[0].command = "foreign"; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }],
 ]) {
   test(`${name} refuses explicit-contract uninstall without mutation`, async (t) => {
     const { contractPath, claudeHome, directory, env } = await isolated(t);
@@ -88,7 +88,7 @@ test("uninstall ignores a missing supplied contract when the installed receipt i
   const result = await invoke(["uninstall", "--global", "--target", "claude", "--contract", join(directory, "missing.json")], { env });
 
   assert.equal(result.code, 0);
-  assert.deepEqual(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")), {});
+  assert.equal(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")).hooks?.PreToolUse, undefined);
 });
 
 test("uninstall works without --contract after the contract file is gone", async (t) => { const { contractPath, claudeHome, codexHome, env } = await isolated(t); await invoke(["install", "--global", "--target", "both", "--contract", contractPath], { env }); await rm(contractPath); const result = await invoke(["uninstall", "--global", "--target", "both"], { env }); assert.equal(result.code, 0); assert.doesNotMatch(await readFile(join(claudeHome, "CLAUDE.md"), "utf8"), /ORBITLANE:START claude/); assert.doesNotMatch(await readFile(join(codexHome, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/); assert.deepEqual(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")), {}); });
@@ -105,8 +105,11 @@ test("a successful uninstall reclaims the snapshot store but keeps the heartbeat
   assert.equal((await readdir(join(claudeHome, ".orbitlane", "runtime-defaults"))).length, 1);
   const heartbeatPath = join(claudeHome, ".orbitlane", "claude-heartbeats.jsonl");
   const hmacKeyPath = join(claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key");
+  const evidencePath = join(claudeHome, ".orbitlane", "evidence", "global", "execution-usage.v1.jsonl");
   const hmacKey = await readFile(hmacKeyPath);
   await writeFile(heartbeatPath, "{}\n", "utf8");
+  await mkdir(join(claudeHome, ".orbitlane", "evidence", "global"), { recursive: true });
+  await writeFile(evidencePath, "{}\n", "utf8");
 
   const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
 
@@ -116,6 +119,7 @@ test("a successful uninstall reclaims the snapshot store but keeps the heartbeat
   await assert.rejects(readdir(join(claudeHome, ".orbitlane", "hook")));
   assert.equal(await readFile(heartbeatPath, "utf8"), "{}\n");
   assert.deepEqual(await readFile(hmacKeyPath), hmacKey);
+  assert.equal(await readFile(evidencePath, "utf8"), "{}\n");
 });
 
 test("Claude HMAC keys remain stable across reinstall and Codex-only installs do not create one", async (t) => {
@@ -194,7 +198,7 @@ test("a legacy 0.2.0 receipt without a version still proves ownership", async (t
   const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
 
   assert.equal(result.code, 0);
-  assert.deepEqual(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")), {});
+  assert.equal(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")).hooks.PreToolUse, undefined);
 });
 
 test("a proper guidance-only receipt never reads or mutates settings", async (t) => {

@@ -97,6 +97,7 @@ test("present to absent removes only the exact owned Agent hook", async (t) => {
   const settings = JSON.parse(await readFile(settingsPath, "utf8"));
   settings.hooks.PreToolUse[0].hooks.push({ type: "command", command: "foreign-agent" });
   settings.hooks.PreToolUse.push({ matcher: "Bash", hooks: [{ type: "command", command: "foreign-bash" }] });
+  settings.hooks.PostToolUse[0].hooks.push({ type: "command", command: "foreign-post" });
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 
   assert.equal((await transitionAbsent(context)).code, 0);
@@ -105,6 +106,21 @@ test("present to absent removes only the exact owned Agent hook", async (t) => {
     { matcher: "Agent", hooks: [{ type: "command", command: "foreign-agent" }] },
     { matcher: "Bash", hooks: [{ type: "command", command: "foreign-bash" }] },
   ]);
+  assert.deepEqual(after.hooks.PostToolUse, [{ matcher: "Agent", hooks: [{ type: "command", command: "foreign-post" }] }]);
+});
+
+test("a missing exact PostToolUse tuple fails closed before a guard reinstall", async (t) => {
+  const context = await withBothContracts(t);
+  await installPresent(context);
+  const settingsPath = join(context.claudeHome, "settings.json");
+  const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+  delete settings.hooks.PostToolUse;
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  const before = await filesBefore(context);
+  const result = await invoke(["install", "--global", "--target", "claude", "--contract", context.contractPath], { env: context.env });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout + result.stderr, /RECEIPT_UNVERIFIABLE/);
+  await assertUnchanged(context, before);
 });
 
 test("present to absent leaves a valid guidance receipt and inert vendored runtime", async (t) => {
@@ -139,11 +155,45 @@ test("absent to present restores one hook and remains idempotent", async (t) => 
   assert.ok((await readdir(join(context.claudeHome, ".orbitlane", "hook"))).length > 0);
 });
 
+test("v2 receipt owns exactly the Agent PreToolUse and PostToolUse tuples", async (t) => {
+  const context = await withBothContracts(t);
+  await installPresent(context);
+  const report = JSON.parse(await readFile(join(context.claudeHome, ".orbitlane", "claude-report.json"), "utf8"));
+  assert.equal(report.receipt.version, 2);
+  assert.deepEqual(report.receipt.hooks.map(({ event, matcher }) => ({ event, matcher })), [
+    { event: "PreToolUse", matcher: "Agent" },
+    { event: "PostToolUse", matcher: "Agent" },
+  ]);
+  const settings = JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8"));
+  assert.equal(settings.hooks.PreToolUse[0].hooks.length, 1);
+  assert.equal(settings.hooks.PostToolUse[0].hooks.length, 1);
+});
+
+test("a v1 to v2 migration refuses before mutation when its owned Pre tuple is absent", async (t) => {
+  const context = await withBothContracts(t);
+  await installPresent(context);
+  const reportPath = join(context.claudeHome, ".orbitlane", "claude-report.json");
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.receipt = { version: 1, install_shape: "claude-managed-role-guard", guard_command: report.receipt.hooks[0].command };
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  const settingsPath = join(context.claudeHome, "settings.json");
+  const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+  settings.hooks.PreToolUse[0].hooks[0].command = "foreign-pre";
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  const before = await filesBefore(context);
+
+  const result = await invoke(["install", "--global", "--target", "claude", "--contract", context.contractPath], { env: context.env });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout + result.stderr, /RECEIPT_UNVERIFIABLE/);
+  await assertUnchanged(context, before);
+});
+
 for (const [name, mutate, code] of [
   ["corrupt report", async (context) => writeFile(join(context.claudeHome, ".orbitlane", "claude-report.json"), "{not json", "utf8"), "REPORT_UNREADABLE"],
   ["pointerless versioned report", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); delete report.contract_snapshot; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "REPORT_POINTER_MISSING"],
   ["receiptless report with Agent hook", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); delete report.receipt; delete report.settings_projection.guard_command; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "RECEIPT_UNVERIFIABLE"],
-  ["receipt mismatch", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.receipt.guard_command = "other-command"; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "RECEIPT_UNVERIFIABLE"],
+  ["receipt mismatch", async (context) => { const path = join(context.claudeHome, ".orbitlane", "claude-report.json"); const report = JSON.parse(await readFile(path, "utf8")); report.receipt.hooks[0].command = "other-command"; await writeFile(path, `${JSON.stringify(report)}\n`, "utf8"); }, "RECEIPT_UNVERIFIABLE"],
 ]) {
   test(`${name} aborts a roles-present to roles-absent transition before writes`, async (t) => {
     const context = await withBothContracts(t);
@@ -165,7 +215,7 @@ test("a legacy report transitions with its exact live command", async (t) => {
   delete report.receipt;
   await writeFile(path, `${JSON.stringify(report)}\n`, "utf8");
   assert.equal((await transitionAbsent(context)).code, 0);
-  assert.deepEqual(JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8")), {});
+  assert.equal(JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8")).hooks?.PreToolUse, undefined);
 });
 
 test("a malformed PreToolUse value is unowned for transition, direct installer, and uninstall", async (t) => {
@@ -277,8 +327,8 @@ test("an interrupted transition rolls back, recovery restores it, and retry succ
   const context = await withBothContracts(t);
   await installPresent(context);
   const report = await readFile(join(context.claudeHome, ".orbitlane", "claude-report.json"), "utf8");
-  const command = JSON.parse(report).receipt.guard_command;
-  const action = Object.freeze({ kind: "remove-owned-hook", command, reportHash: sha256(report) });
+  const hooks = JSON.parse(report).receipt.hooks;
+  const action = Object.freeze({ kind: "remove-owned-hook", hooks, reportHash: sha256(report) });
   const interrupted = await installRouting(ROLES_LESS, { target: "claude", adapters: { claude: await transitionAdapter(context, action, "leaveAfterInstructionCommit") } });
   assert.equal(interrupted.outcomes.claude.error.code, "INTERRUPTED_FOR_RECOVERY");
   assert.match(await readFile(join(context.claudeHome, "CLAUDE.md"), "utf8"), /execution -> claude-terra/);
@@ -286,7 +336,7 @@ test("an interrupted transition rolls back, recovery restores it, and retry succ
   assert.match(await readFile(join(context.claudeHome, "CLAUDE.md"), "utf8"), /ORBITLANE:START claude/);
   const retried = await installRouting(ROLES_LESS, { target: "claude", adapters: { claude: await transitionAdapter(context, action) } });
   assert.equal(retried.outcomes.claude.status, "installed");
-  assert.deepEqual(JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8")), {});
+  assert.equal(JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8")).hooks?.PreToolUse, undefined);
 });
 
 async function atomicAssetAdapter(context, failurePoint) {

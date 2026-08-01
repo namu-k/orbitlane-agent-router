@@ -182,7 +182,24 @@ function runtimeFailure(adapter) {
   return null;
 }
 
-function previousGuardCommand(content) {
+function tuple(event, matcher, command, installedScope) {
+  return Object.freeze({ event, matcher, command, ...(installedScope === undefined ? {} : { installed_scope: installedScope }) });
+}
+
+function normalizeTuples(value) {
+  if (typeof value === "string") return [tuple("PreToolUse", "Agent", value)];
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.hooks)) return value.hooks;
+  if (typeof value?.command === "string") return [tuple("PreToolUse", "Agent", value.command)];
+  return [];
+}
+
+function validTuple(value) {
+  return value !== null && typeof value === "object" && ["PreToolUse", "PostToolUse"].includes(value.event)
+    && value.matcher === "Agent" && typeof value.command === "string" && value.command.length > 0;
+}
+
+function previousGuardTuples(content) {
   if (content.length === 0) return undefined;
   let report;
   try { report = JSON.parse(content); } catch {
@@ -196,45 +213,48 @@ function previousGuardCommand(content) {
   }
   if (report.receipt?.version !== undefined) {
     if (report.schema_version !== 2) throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: a versioned receipt requires schema version 2"), { code: "RECEIPT_UNVERIFIABLE" });
+    if (report.receipt.version === 2 && Array.isArray(report.receipt.hooks) && report.receipt.hooks.length > 0 && report.receipt.hooks.every(validTuple)) return report.receipt.hooks;
     if (report.receipt.version !== 1) throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: the existing receipt version is unsupported"), { code: "RECEIPT_UNVERIFIABLE" });
     if (report.receipt.install_shape === "guidance-only") return undefined;
-    if (report.receipt.install_shape === "claude-managed-role-guard" && typeof report.receipt.guard_command === "string" && report.receipt.guard_command.length > 0) return report.receipt.guard_command;
+    if (report.receipt.install_shape === "claude-managed-role-guard" && typeof report.receipt.guard_command === "string" && report.receipt.guard_command.length > 0) return [tuple("PreToolUse", "Agent", report.receipt.guard_command)];
     throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: the existing receipt is malformed"), { code: "RECEIPT_UNVERIFIABLE" });
   }
-  return report?.settings_projection?.guard_command;
+  return typeof report?.settings_projection?.guard_command === "string" ? [tuple("PreToolUse", "Agent", report.settings_projection.guard_command)] : undefined;
 }
 
-function hasAgentHook(content, command) {
+function hasOwnedTuples(content, tuples) {
   let settings;
   try { settings = content.length === 0 ? {} : JSON.parse(content); } catch {
     throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: settings could not be parsed"), { code: "RECEIPT_UNVERIFIABLE" });
   }
-  const entries = settings?.hooks?.PreToolUse;
-  if (!Array.isArray(entries)) return false;
-  return entries
-    .filter((entry) => entry?.matcher === "Agent")
-    .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-    .some((hook) => hook?.type === "command" && hook.command === command);
+  return normalizeTuples(tuples).every((owned) => {
+    if (!validTuple(owned)) return false;
+    const entries = settings?.hooks?.[owned.event];
+    return Array.isArray(entries) && entries.some((entry) => entry?.matcher === owned.matcher
+      && Array.isArray(entry.hooks) && entry.hooks.some((hook) => hook?.type === "command" && hook.command === owned.command));
+  });
 }
 
 function mergeSettings(content, command, previousCommand, remove = false) {
   const settings = content.length === 0 ? {} : JSON.parse(content);
   const hooks = settings.hooks ?? {};
-  const entries = hooks.PreToolUse ?? [];
-  const ownedCommands = new Set([command, previousCommand].filter((value) => typeof value === "string"));
-  const owned = (hook) => hook?.type === "command" && ownedCommands.has(hook.command);
-  const retained = entries.flatMap((entry) => {
-    if (entry?.matcher !== "Agent" || !Array.isArray(entry.hooks)) return [entry];
-    const next = entry.hooks.filter((hook) => !owned(hook));
-    return next.length === 0 ? [] : [{ ...entry, hooks: next }];
-  });
-  if (remove && retained.length === 0) {
-    const { PreToolUse, ...otherHooks } = hooks;
-    if (Object.keys(otherHooks).length === 0) delete settings.hooks;
-    else settings.hooks = otherHooks;
-  } else {
-    settings.hooks = { ...hooks, PreToolUse: remove ? retained : [...retained, { matcher: "Agent", hooks: [{ type: "command", command }] }] };
+  const desired = normalizeTuples(command);
+  const previous = normalizeTuples(previousCommand);
+  const owned = new Set([...desired, ...previous].filter(validTuple).map(({ event, matcher, command: value }) => `${event}\u0000${matcher}\u0000${value}`));
+  const nextHooks = { ...hooks };
+  for (const event of new Set([...Object.keys(hooks), ...desired.map(({ event: value }) => value), ...previous.map(({ event: value }) => value)])) {
+    const entries = Array.isArray(hooks[event]) ? hooks[event] : [];
+    const retained = entries.flatMap((entry) => {
+      if (!entry || !Array.isArray(entry.hooks)) return [entry];
+      const next = entry.hooks.filter((hook) => !owned.has(`${event}\u0000${entry.matcher}\u0000${hook?.command}`));
+      return next.length === 0 ? [] : [{ ...entry, hooks: next }];
+    });
+    const additions = remove ? [] : desired.filter((ownedTuple) => ownedTuple.event === event).map(({ matcher, command: value }) => ({ matcher, hooks: [{ type: "command", command: value }] }));
+    if (retained.length + additions.length === 0) delete nextHooks[event];
+    else nextHooks[event] = [...retained, ...additions];
   }
+  if (Object.keys(nextHooks).length === 0) delete settings.hooks;
+  else settings.hooks = nextHooks;
   return `${JSON.stringify(settings, null, 2)}\n`;
 }
 
@@ -253,23 +273,24 @@ function installDiff(target, instruction, generated, settings, rendered) {
 function adapterTransitionSettings(settings, generated, rendered) {
   const action = rendered.transitionAction;
   if (action !== undefined) {
-    const previousCommand = previousGuardCommand(generated.content);
-    if (settings === null || action?.kind !== "remove-owned-hook" || typeof action.command !== "string"
-      || action.reportHash !== sha256(generated.content) || previousCommand !== action.command || !hasAgentHook(settings.content, action.command)) {
+    const previousCommand = previousGuardTuples(generated.content);
+    const ownedTuples = normalizeTuples(action.hooks ?? action.command);
+    if (settings === null || action?.kind !== "remove-owned-hook" || ownedTuples.length === 0
+      || action.reportHash !== sha256(generated.content) || !hasOwnedTuples(settings.content, ownedTuples)) {
       throw Object.assign(new Error("RECEIPT_UNVERIFIABLE: transition ownership could not be verified"), { code: "RECEIPT_UNVERIFIABLE" });
     }
-    return Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, action.command, previousCommand, true) });
+    return Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, ownedTuples, previousCommand, true) });
   }
   return settings === null || rendered.settingsProjection === undefined
     ? null
-    : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, rendered.settingsProjection.command, previousGuardCommand(generated.content)) });
+    : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, rendered.settingsProjection, previousGuardTuples(generated.content)) });
 }
 
 function uninstallDiff(target, instruction, generated, settings, adapter) {
   return Object.freeze({
     instruction: Object.freeze({ path: instruction.path, before: instruction.content, after: instruction.content.replace(ownedBlockPattern(target), "") }),
     generated: Object.freeze({ path: generated.path, before: generated.content, after: null }),
-    settings: settings === null ? null : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, adapter.spawnGuardCommand, previousGuardCommand(generated.content), true) }),
+    settings: settings === null ? null : Object.freeze({ path: settings.path, before: settings.content, after: mergeSettings(settings.content, adapter.spawnGuardCommand, previousGuardTuples(generated.content), true) }),
   });
 }
 

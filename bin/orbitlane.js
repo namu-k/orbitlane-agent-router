@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, realpath, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,15 +75,18 @@ function transitionFailure(code, path) {
   return Object.assign(new Error(`${code}: ${path}`), { code });
 }
 
-function hasAgentHook(settings, command) {
-  const entries = settings?.hooks?.PreToolUse;
-  if (!Array.isArray(entries)) return false;
-  return entries
-    .filter((entry) => entry?.matcher === "Agent")
-    .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-    .some((hook) => hook?.type === "command" && hook.command === command);
+function hasHookTuples(settings, tuples) {
+  return tuples.every(({ event, matcher, command }) => Array.isArray(settings?.hooks?.[event])
+    && settings.hooks[event].some((entry) => entry?.matcher === matcher
+      && Array.isArray(entry.hooks) && entry.hooks.some((hook) => hook?.type === "command" && hook.command === command)));
 }
 
+function receiptHooks(receipt) {
+  if (receipt?.version === 2 && Array.isArray(receipt.hooks) && receipt.hooks.length > 0
+    && receipt.hooks.every((hook) => ["PreToolUse", "PostToolUse"].includes(hook?.event) && hook.matcher === "Agent" && typeof hook.command === "string" && hook.command.length > 0)) return receipt.hooks;
+  if (receipt?.version === 1 && receipt.install_shape === "claude-managed-role-guard" && typeof receipt.guard_command === "string") return [{ event: "PreToolUse", matcher: "Agent", command: receipt.guard_command }];
+  return undefined;
+}
 
 async function claudeTransitionAction(options, claudeGuardEnabled) {
   if (options.command !== "install" || (options.target !== "claude" && options.target !== "both")) return undefined;
@@ -99,7 +102,7 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
   const receipt = report.receipt;
   const legacy = receipt?.version === undefined;
   if (!legacy) {
-    if (receipt?.version !== 1 || !["guidance-only", "claude-managed-role-guard"].includes(receipt.install_shape)
+    if (!([1, 2].includes(receipt?.version)) || (receipt.version === 1 && !["guidance-only", "claude-managed-role-guard"].includes(receipt.install_shape))
       || (receipt.install_shape === "claude-managed-role-guard" && (typeof receipt.guard_command !== "string" || receipt.guard_command.length === 0))) {
       throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
     }
@@ -110,17 +113,16 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
     if (effective.reportPath !== canonicalGeneratedPath) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
   }
   if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
-  const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+  const hooks = legacy ? (typeof report?.settings_projection?.guard_command === "string" ? [{ event: "PreToolUse", matcher: "Agent", command: report.settings_projection.guard_command }] : undefined) : receiptHooks(receipt);
   if (!legacy && (!report?.contract_snapshot || !digest.test(report.contract_snapshot.sha256 ?? ""))) throw transitionFailure("REPORT_POINTER_MISSING", resolved.generatedPath);
-  if ((legacy && (typeof command !== "string" || command.length === 0))
-    || (!legacy && (receipt?.version !== 1 || receipt.install_shape !== "claude-managed-role-guard" || typeof command !== "string" || command.length === 0))) {
+  if (!Array.isArray(hooks)) {
     throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
   }
   let settings;
   try { settings = JSON.parse(await readFile(resolved.settingsPath, "utf8")); } catch { throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath); }
-  if (!hasAgentHook(settings, command)) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath);
+  if (!hasHookTuples(settings, hooks)) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath);
   if (claudeGuardEnabled) return undefined;
-  return Object.freeze({ kind: "remove-owned-hook", command, reportHash: sha256(content) });
+  return Object.freeze({ kind: "remove-owned-hook", hooks, reportHash: sha256(content) });
 }
 
 async function readJsonIfPossible(path) {
@@ -168,10 +170,10 @@ async function receiptAdapters(options) {
     // proves nothing and must not touch settings.json.
     const versionedWithoutSchema = receipt?.version !== undefined && report?.schema_version !== 2;
     const legacy = receipt?.version === undefined;
-    const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+    const hooks = legacy ? (typeof report?.settings_projection?.guard_command === "string" ? [{ event: "PreToolUse", matcher: "Agent", command: report.settings_projection.guard_command }] : undefined) : receiptHooks(receipt);
     const shape = legacy
-      ? (typeof command === "string" && command.length > 0 ? "claude-managed-role-guard" : undefined)
-      : receipt?.version === 1 ? receipt.install_shape : undefined;
+      ? (Array.isArray(hooks) ? "claude-managed-role-guard" : undefined)
+      : Array.isArray(hooks) ? "claude-managed-role-guard" : receipt?.version === 1 ? receipt.install_shape : undefined;
 
     if (!versionedWithoutSchema && report !== undefined && shape === "guidance-only") {
       const staleCommand = report?.settings_projection?.guard_command;
@@ -192,9 +194,9 @@ async function receiptAdapters(options) {
       // matcher would report a successful uninstall while leaving the entry in place
       // and deleting the runtime it points at.
       const settings = await readJsonIfPossible(resolved.claude.settingsPath);
-      const installed = hasAgentHook(settings, command);
-      result.claude = !versionedWithoutSchema && shape === "claude-managed-role-guard" && typeof command === "string" && command.length > 0 && installed
-        ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
+      const installed = Array.isArray(hooks) && hasHookTuples(settings, hooks);
+      result.claude = !versionedWithoutSchema && shape === "claude-managed-role-guard" && installed
+        ? Object.freeze({ ...resolved.claude, spawnGuardCommand: hooks })
         : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
     }
   }
@@ -224,6 +226,14 @@ function adapters(contract, options) {
         managedAssets: options.managedAssets,
         ...(options.claudeGuardEnabled === false ? {} : {
           spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+          usageObserverCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root, "claude-usage-hook.js"), join(generated, "evidence", options.global === true ? "global" : "project", "execution-usage.v1.jsonl"), options.global === true ? "global" : "project", options.collectorInstanceRef ?? "preflight"),
+          installedScope: options.global === true ? "global" : "project",
+          telemetryRoot: resolved.claude.root,
+          collectorInstanceRef: options.collectorInstanceRef,
+          runtimeVersionSnapshot: options.runtimeVersionSnapshot,
+          secretPaths: options.secretPaths,
+          evidenceRoots: options.evidenceRoots,
+          ownedFiles: options.ownedFiles,
         }),
         runtimeDefaults,
         contractSha256: options.contractSha256,
@@ -264,9 +274,14 @@ async function reclaimDerivedState(options, report) {
   }
 }
 
-function prepareClaudeAssets(root) {
+function prepareClaudeTelemetry(root, global) {
   const keyPath = join(root, ".orbitlane", "secrets", "telemetry-hmac.key");
   return Object.freeze({
+    collectorInstanceRef: randomUUID(),
+    runtimeVersionSnapshot: { version: null, version_source: "unknown", version_observed_at: null, version_freshness: "unknown" },
+    secretPaths: [keyPath],
+    evidenceRoots: [join(root, ".orbitlane", "evidence", global ? "global" : "project")],
+    ownedFiles: [join(root, ".orbitlane", "hook"), join(root, ".orbitlane", "claude-report.json"), keyPath],
     managedAssets: [
       Object.freeze({ name: "runtime", kind: "directory", path: join(root, ".orbitlane", "hook"), sourcePath: join(PACKAGE_ROOT, "src"), packageJson: true }),
       Object.freeze({ name: "telemetry-hmac-key", kind: "file", path: keyPath, mode: 0o600 }),
@@ -314,7 +329,7 @@ async function main() {
     try {
       const transitionAction = await claudeTransitionAction(options, claudeGuardEnabled);
       const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
-      const claudeAssets = claudeGuardEnabled ? prepareClaudeAssets(claudeRoot) : {};
+      const telemetry = claudeGuardEnabled ? prepareClaudeTelemetry(claudeRoot, options.global === true) : {};
       const contractSnapshot = planSnapshot(claudeRoot, "contracts", contractSource.bytes);
       const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : planSnapshot(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
       const snapshotAssets = persist ? [
@@ -322,7 +337,8 @@ async function main() {
         ...(runtimeDefaultsSnapshot === undefined ? [] : [Object.freeze({ name: `runtime-defaults-${runtimeDefaultsSnapshot.sha256}`, kind: "file", path: runtimeDefaultsSnapshot.path, content: runtimeDefaultsSource.bytes, mode: 0o600 })]),
       ] : [];
       prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256,
-        managedAssets: persist ? [...snapshotAssets, ...(claudeGuardEnabled ? claudeAssets.managedAssets : [])] : [],
+        ...(claudeGuardEnabled ? telemetry : { collectorInstanceRef: "dry-run", runtimeVersionSnapshot: { version: null, version_source: "unknown", version_observed_at: null, version_freshness: "unknown" }, secretPaths: [], evidenceRoots: [], ownedFiles: [] }),
+        managedAssets: persist ? [...snapshotAssets, ...(claudeGuardEnabled ? telemetry.managedAssets : [])] : [],
         ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
     } catch (error) {
       prepared = { claudePreparationError: error };
