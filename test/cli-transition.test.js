@@ -288,3 +288,65 @@ test("an interrupted transition rolls back, recovery restores it, and retry succ
   assert.equal(retried.outcomes.claude.status, "installed");
   assert.deepEqual(JSON.parse(await readFile(join(context.claudeHome, "settings.json"), "utf8")), {});
 });
+
+async function atomicAssetAdapter(context, failurePoint) {
+  const source = join(context.directory, "runtime-source");
+  const runtime = join(context.claudeHome, ".orbitlane", "hook");
+  const key = join(context.claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key");
+  await mkdir(source, { recursive: true });
+  await writeFile(join(source, "runtime.js"), "export const runtime = 'new';\n", "utf8");
+  const contract = JSON.parse(await readFile(context.contractPath, "utf8"));
+  const adapter = createClaudeTier1Adapter(contract, {
+    instructionPath: join(context.claudeHome, "CLAUDE.md"),
+    generatedPath: join(context.claudeHome, ".orbitlane", "claude-report.json"),
+    settingsPath: join(context.claudeHome, "settings.json"),
+    contractSha256: "a".repeat(64),
+    spawnGuardCommand: "managed-pre",
+    usageObserverCommand: "managed-post",
+    installedScope: "global",
+    managedAssets: [
+      { name: "runtime", kind: "directory", path: runtime, sourcePath: source },
+      { name: "telemetry-hmac-key", kind: "file", path: key, mode: 0o600 },
+    ],
+  });
+  return Object.freeze({ ...adapter, failurePoint });
+}
+
+for (const [name, prepare] of [
+  ["fresh", async () => {}],
+  ["preexisting", async (context) => {
+    await mkdir(join(context.claudeHome, ".orbitlane", "hook"), { recursive: true });
+    await writeFile(join(context.claudeHome, ".orbitlane", "hook", "runtime.js"), "old runtime\n", "utf8");
+    await mkdir(join(context.claudeHome, ".orbitlane", "secrets"), { recursive: true });
+    await writeFile(join(context.claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key"), "old key", "utf8");
+  }],
+]) {
+  test(`${name} managed runtime and HMAC key roll back with the Claude transaction`, async (t) => {
+    const context = await withBothContracts(t);
+    await prepare(context);
+    const runtime = join(context.claudeHome, ".orbitlane", "hook", "runtime.js");
+    const key = join(context.claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key");
+    const beforeRuntime = await readFile(runtime, "utf8").catch(() => undefined);
+    const beforeKey = await readFile(key).catch(() => undefined);
+    const result = await installRouting(JSON.parse(await readFile(context.contractPath, "utf8")), { target: "claude", adapters: { claude: await atomicAssetAdapter(context, "afterInstructionCommit") } });
+    assert.equal(result.outcomes.claude.error.code, "INSTALL_INTERRUPTED");
+    assert.deepEqual(await readFile(runtime, "utf8").catch(() => undefined), beforeRuntime);
+    assert.deepEqual(await readFile(key).catch(() => undefined), beforeKey);
+  });
+}
+
+test("hard-crash recovery restores preexisting managed runtime and HMAC key", async (t) => {
+  const context = await withBothContracts(t);
+  await mkdir(join(context.claudeHome, ".orbitlane", "hook"), { recursive: true });
+  await writeFile(join(context.claudeHome, ".orbitlane", "hook", "runtime.js"), "old runtime\n", "utf8");
+  await mkdir(join(context.claudeHome, ".orbitlane", "secrets"), { recursive: true });
+  const key = join(context.claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key");
+  await writeFile(key, "old key", "utf8");
+  const result = await installRouting(JSON.parse(await readFile(context.contractPath, "utf8")), { target: "claude", adapters: { claude: await atomicAssetAdapter(context, "leaveAfterInstructionCommit") } });
+  assert.equal(result.outcomes.claude.error.code, "INTERRUPTED_FOR_RECOVERY");
+  assert.equal(await readFile(join(context.claudeHome, ".orbitlane", "hook", "runtime.js"), "utf8"), "export const runtime = 'new';\n");
+  assert.deepEqual(await readFile(key), Buffer.from("old key"), "reinstalls reuse the existing HMAC key before recovery");
+  assert.equal((await recoverRouting({ manifest: result.outcomes.claude.manifest })).status, "recovered");
+  assert.equal(await readFile(join(context.claudeHome, ".orbitlane", "hook", "runtime.js"), "utf8"), "old runtime\n");
+  assert.deepEqual(await readFile(key), Buffer.from("old key"));
+});

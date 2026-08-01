@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { markerBoundedPolicy } from "../policy/index.js";
 
@@ -36,12 +36,46 @@ async function stageSnapshot(transactionPath, name, source) {
   return Object.freeze({ path, hash: source.hash, timestamp: source.timestamp, exists: source.exists, mode: source.mode, targetPath: source.path });
 }
 
-async function createManifest(target, transactionPath, instruction, generated, settings) {
+async function directoryDigest(path) {
+  const entries = [];
+  async function visit(directory, prefix = "") {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relative = `${prefix}${entry.name}`;
+      const child = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(child, `${relative}/`);
+      else entries.push(`${relative}:${createHash("sha256").update(await readFile(child)).digest("hex")}`);
+    }
+  }
+  await visit(path);
+  return sha256(entries.sort().join("\n"));
+}
+
+async function snapshotAsset(transactionPath, asset) {
+  const backupPath = join(transactionPath, `${asset.name}.backup`);
+  try {
+    const metadata = await stat(asset.path);
+    if (asset.kind === "directory") {
+      if (!metadata.isDirectory()) throw Object.assign(new Error(`ASSET_TYPE_MISMATCH: ${asset.path}`), { code: "ASSET_TYPE_MISMATCH" });
+      await cp(asset.path, backupPath, { recursive: true });
+      return Object.freeze({ name: asset.name, kind: asset.kind, path: backupPath, hash: await directoryDigest(backupPath), timestamp: new Date().toISOString(), exists: true, mode: metadata.mode & 0o777, targetPath: asset.path });
+    }
+    if (!metadata.isFile()) throw Object.assign(new Error(`ASSET_TYPE_MISMATCH: ${asset.path}`), { code: "ASSET_TYPE_MISMATCH" });
+    const content = await readFile(asset.path);
+    await writeFile(backupPath, content);
+    return Object.freeze({ name: asset.name, kind: asset.kind, path: backupPath, hash: createHash("sha256").update(content).digest("hex"), timestamp: new Date().toISOString(), exists: true, mode: metadata.mode & 0o777, targetPath: asset.path });
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return Object.freeze({ name: asset.name, kind: asset.kind, path: backupPath, hash: sha256(""), timestamp: new Date().toISOString(), exists: false, mode: null, targetPath: asset.path });
+  }
+}
+
+async function createManifest(target, transactionPath, instruction, generated, settings, assets = []) {
   await mkdir(transactionPath, { recursive: true });
   const backups = Object.freeze([
     await stageSnapshot(transactionPath, "instruction", instruction),
     await stageSnapshot(transactionPath, "generated", generated),
     ...(settings === null ? [] : [await stageSnapshot(transactionPath, "settings", settings)]),
+    ...await Promise.all(assets.map((asset) => snapshotAsset(transactionPath, asset))),
   ]);
   return persistManifest(Object.freeze({ version: 1, target, path: join(transactionPath, "manifest.json"), phase: "prepared", backups }));
 }
@@ -58,6 +92,11 @@ async function replaceStaged(stagedPath, destination) {
 }
 
 async function restoreBackup(backup, transactionPath) {
+  if (backup.kind === "directory") {
+    await rm(backup.targetPath, { recursive: true, force: true });
+    if (backup.exists) await cp(backup.path, backup.targetPath, { recursive: true });
+    return;
+  }
   if (!backup.exists) {
     await rm(backup.targetPath, { force: true });
     return;
@@ -65,6 +104,45 @@ async function restoreBackup(backup, transactionPath) {
   const stagedPath = join(transactionPath, `restore-${randomUUID()}.stage`);
   await writeStaged(stagedPath, await readFile(backup.path, "utf8"), backup.mode);
   await replaceStaged(stagedPath, backup.targetPath);
+}
+
+function managedAssets(adapter) {
+  return Array.isArray(adapter?.managedAssets) ? adapter.managedAssets : [];
+}
+
+async function stageManagedAssets(transactionPath, assets, manifest) {
+  const backups = new Map(manifest.backups.filter((backup) => backup.name !== undefined).map((backup) => [backup.name, backup]));
+  const stages = [];
+  for (const asset of assets) {
+    const stage = join(transactionPath, `${asset.name}.stage`);
+    const backup = backups.get(asset.name);
+    if (asset.kind === "directory") {
+      await cp(asset.sourcePath, stage, { recursive: true });
+      if (asset.packageJson === true) await writeFile(join(stage, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`, "utf8");
+      stages.push(Object.freeze({ path: stage, kind: "directory", hash: await directoryDigest(stage), destination: asset.path }));
+    } else {
+      const content = asset.content ?? (backup?.exists ? await readFile(backup.path) : randomBytes(32));
+      await writeFile(stage, content);
+      await preserveMode(stage, asset.mode ?? backup?.mode ?? 0o600);
+      stages.push(Object.freeze({ path: stage, kind: "file", hash: createHash("sha256").update(content).digest("hex"), destination: asset.path }));
+    }
+  }
+  return stages;
+}
+
+async function commitManagedAssets(stages) {
+  for (const stage of stages) {
+    await mkdir(dirname(stage.destination), { recursive: true });
+    if (stage.kind === "directory") {
+      const retired = `${stage.destination}.retired-${randomUUID()}`;
+      const replaced = await rename(stage.destination, retired).then(() => true, (error) => {
+        if (error?.code === "ENOENT") return false;
+        throw error;
+      });
+      await rename(stage.path, stage.destination);
+      if (replaced) await rm(retired, { recursive: true, force: true });
+    } else await replaceStaged(stage.path, stage.destination);
+  }
 }
 
 async function rollback(manifest, transactionPath) {
@@ -205,7 +283,8 @@ async function originalsMatch(instruction, generated, settings) {
 
 async function validateStages(stages) {
   for (const stage of stages) {
-    if (sha256(await readFile(stage.path, "utf8")) !== stage.hash) {
+    const hash = stage.kind === "directory" ? await directoryDigest(stage.path) : createHash("sha256").update(await readFile(stage.path)).digest("hex");
+    if (hash !== stage.hash) {
       return false;
     }
   }
@@ -217,18 +296,19 @@ async function validateRecoveryManifest(manifest, requestedPath) {
     || !TARGET_NAMES.includes(manifest.target) || typeof manifest.path !== "string"
     || manifest.path !== requestedPath
     || !["prepared", "committing", "completed", "aborted", "rolled_back", "recovered"].includes(manifest.phase)
-    || !Array.isArray(manifest.backups) || ![2, 3].includes(manifest.backups.length)) return null;
+    || !Array.isArray(manifest.backups) || manifest.backups.length < 2) return null;
   const transactionPath = dirname(manifest.path);
-  const backupNames = manifest.backups.length === 3 ? ["instruction", "generated", "settings"] : ["instruction", "generated"];
+  const backupNames = manifest.backups.length >= 3 && manifest.backups[2]?.name === undefined ? ["instruction", "generated", "settings"] : ["instruction", "generated"];
   const backupContents = [];
   for (const [index, backup] of manifest.backups.entries()) {
     if (backup === null || typeof backup !== "object" || typeof backup.path !== "string"
       || typeof backup.targetPath !== "string" || typeof backup.hash !== "string"
       || !/^[a-f0-9]{64}$/.test(backup.hash) || typeof backup.timestamp !== "string"
       || typeof backup.exists !== "boolean" || !(backup.mode === null || Number.isInteger(backup.mode))
-      || backup.path !== join(transactionPath, `${backupNames[index]}.backup`)) return null;
-    const content = await readFile(backup.path, "utf8");
-    if (sha256(content) !== backup.hash) return null;
+      || backup.path !== join(transactionPath, `${backup.name ?? backupNames[index]}.backup`)) return null;
+    if (backup.kind !== undefined && !["directory", "file"].includes(backup.kind)) return null;
+    const content = backup.exists === false ? "" : backup.kind === "directory" ? await directoryDigest(backup.path) : backup.kind === "file" ? await readFile(backup.path) : await readFile(backup.path, "utf8");
+    if ((backup.kind === "directory" ? content : backup.kind === "file" ? createHash("sha256").update(content).digest("hex") : sha256(content)) !== backup.hash) return null;
     backupContents.push(content);
   }
   return backupContents;
@@ -246,13 +326,15 @@ async function runTarget(target, adapter, hooks, operation) {
     const instruction = await snapshot(adapter.instructionPath);
     const generated = await snapshot(adapter.generatedPath);
     const settings = adapter.settingsPath === undefined ? null : await snapshot(adapter.settingsPath);
+    const assets = managedAssets(adapter);
     diff = await operation.plan(instruction, generated, settings);
     if (operation.isUnchanged(diff, generated, settings)) return Object.freeze({ status: "unchanged", diff, manifest: null });
     transactionPath = join(dirname(adapter.instructionPath), `.orbitlane-${target}-${randomUUID()}`);
-    manifest = await createManifest(target, transactionPath, instruction, generated, settings);
+    manifest = await createManifest(target, transactionPath, instruction, generated, settings, assets);
     await Promise.all([mkdir(dirname(instruction.path), { recursive: true }), mkdir(dirname(generated.path), { recursive: true }), ...(settings === null ? [] : [mkdir(dirname(settings.path), { recursive: true })])]);
     await operation.stage(transactionPath, diff, instruction, generated, settings);
-    const stages = operation.stages(transactionPath, diff, generated);
+    const assetStages = await stageManagedAssets(transactionPath, assets, manifest);
+    const stages = [...assetStages, ...operation.stages(transactionPath, diff, generated)];
     await hooks.afterStage?.({ target, manifest, diff });
     if (!await validateStages(stages)) return terminalFailure("STAGED_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
     await hooks.beforeCommit?.({ target, manifest, diff });
@@ -262,7 +344,7 @@ async function runTarget(target, adapter, hooks, operation) {
     if (!await validateStages(stages)) return terminalFailure("STAGED_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
     if (!await originalsMatch(instruction, generated, settings)) return terminalFailure("TARGET_CONTENT_CHANGED", diff, undefined, manifest, "aborted");
     commitStarted = true;
-    await operation.commit(transactionPath, diff, instruction, generated, settings, adapter, stages);
+    await operation.commit(transactionPath, diff, instruction, generated, settings, adapter, assetStages, stages);
     manifest = await persistManifest({ ...manifest, phase: "completed" });
     return Object.freeze({ status: operation.status, diff, manifest });
   } catch (error) {
@@ -294,7 +376,8 @@ async function installOne(contract, target, adapter, hooks) {
       Object.freeze({ path: join(transactionPath, "generated.stage"), hash: sha256(diff.generated.after) }),
       ...(diff.settings === null ? [] : [Object.freeze({ path: join(transactionPath, "settings.stage"), hash: sha256(diff.settings.after) })]),
     ]),
-    commit: async (transactionPath, diff, instruction, generated, settings, targetAdapter) => {
+    commit: async (transactionPath, diff, instruction, generated, settings, targetAdapter, assetStages) => {
+      await commitManagedAssets(assetStages);
       await replaceStaged(join(transactionPath, "instruction.stage"), instruction.path);
       if (targetAdapter.failurePoint === "terminateAfterInstructionCommit") process.kill(process.pid, "SIGKILL");
       if (targetAdapter.failurePoint === "leaveAfterInstructionCommit") throw Object.assign(new Error("interrupted for recovery"), { code: "INTERRUPTED_FOR_RECOVERY" });
@@ -320,7 +403,8 @@ async function uninstallOne(target, adapter, hooks) {
       ...(generated.exists ? [Object.freeze({ path: join(transactionPath, "generated.stage"), hash: sha256(generated.content) })] : []),
       ...(diff.settings === null ? [] : [Object.freeze({ path: join(transactionPath, "settings.stage"), hash: sha256(diff.settings.after) })]),
     ]),
-    commit: async (transactionPath, diff, instruction, generated, settings, targetAdapter) => {
+    commit: async (transactionPath, diff, instruction, generated, settings, targetAdapter, assetStages) => {
+      await commitManagedAssets(assetStages);
       await replaceStaged(join(transactionPath, "instruction.stage"), instruction.path);
       if (targetAdapter.failurePoint === "afterInstructionCommit" || hooks.interruptAfterInstructionCommit) throw Object.assign(new Error("interrupted"), { code: "UNINSTALL_INTERRUPTED" });
       if (generated.exists) await rename(generated.path, join(transactionPath, "generated.removed"));

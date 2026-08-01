@@ -90,6 +90,7 @@ export function createClaudeTier1Adapter(contract, options) {
     generatedPath: options.generatedPath,
     settingsPath: options.settingsPath,
     spawnGuardCommand: options.spawnGuardCommand,
+    managedAssets: options.managedAssets,
     runtime: options.runtime,
     supportsVersion: options.supportsVersion,
     render() {
