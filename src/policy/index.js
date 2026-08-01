@@ -8,7 +8,7 @@ import { isMarkerSafeModelToken, validateContractForTarget } from "../schema/ind
 // said is either the runtime's own job or the agent's judgment.
 const KERNEL = Object.freeze([
   "- Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete.",
-  "- Keep judgment that needs full context, discipline, or confidentiality in the main session. A delegate that meets a new consequential judgment outside its assigned scope stops and asks the main session to decide.",
+  "- Delegates settle reversible implementation choices inside assigned scope. Return only decisions that change the approved scope or a public contract, affect data or safety, require new authority, or trigger irreversible/external actions.",
   "- When delegating, use: execution -> {terra}, bounded lookup -> {luna}, delegated verification and analysis -> {sol}.",
   "- Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.",
 ]);

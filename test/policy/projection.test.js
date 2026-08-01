@@ -39,7 +39,7 @@ test("the kernel is four lines carrying this target's model binding", () => {
 
   assert.equal(lines.length, 4);
   assert.match(lines[0], /^- Prefer direct work; delegate to a subagent when the delegation boundary is clear and the benefit is concrete\.$/);
-  assert.match(lines[1], /^- Keep judgment that needs full context, discipline, or confidentiality in the main session\./);
+  assert.equal(lines[1], "- Delegates settle reversible implementation choices inside assigned scope. Return only decisions that change the approved scope or a public contract, affect data or safety, require new authority, or trigger irreversible/external actions.");
   assert.equal(lines[2], "- When delegating, use: execution -> sonnet, bounded lookup -> haiku, delegated verification and analysis -> opus.");
   assert.equal(lines[3], "- Record ROUTE_CONFLICT when parallel delegates hold overlapping write scope on the same file.");
 });
