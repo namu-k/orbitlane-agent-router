@@ -403,8 +403,8 @@ async function installOne(contract, target, adapter, hooks) {
       if (targetAdapter.failurePoint === "terminateAfterInstructionCommit") process.kill(process.pid, "SIGKILL");
       if (targetAdapter.failurePoint === "leaveAfterInstructionCommit") throw Object.assign(new Error("interrupted for recovery"), { code: "INTERRUPTED_FOR_RECOVERY" });
       if (targetAdapter.failurePoint === "afterInstructionCommit" || hooks.interruptAfterInstructionCommit) throw Object.assign(new Error("interrupted"), { code: "INSTALL_INTERRUPTED" });
-      await replaceStaged(join(transactionPath, "generated.stage"), generated.path);
       if (settings !== null) await replaceStaged(join(transactionPath, "settings.stage"), settings.path);
+      await replaceStaged(join(transactionPath, "generated.stage"), generated.path);
     },
   });
 }
