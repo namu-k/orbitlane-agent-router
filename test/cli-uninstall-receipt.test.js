@@ -104,6 +104,8 @@ test("a successful uninstall reclaims the snapshot store but keeps the heartbeat
   assert.equal((await readdir(join(claudeHome, ".orbitlane", "contracts"))).length, 1);
   assert.equal((await readdir(join(claudeHome, ".orbitlane", "runtime-defaults"))).length, 1);
   const heartbeatPath = join(claudeHome, ".orbitlane", "claude-heartbeats.jsonl");
+  const hmacKeyPath = join(claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key");
+  const hmacKey = await readFile(hmacKeyPath);
   await writeFile(heartbeatPath, "{}\n", "utf8");
 
   const result = await invoke(["uninstall", "--global", "--target", "claude"], { env });
@@ -113,6 +115,18 @@ test("a successful uninstall reclaims the snapshot store but keeps the heartbeat
   await assert.rejects(readdir(join(claudeHome, ".orbitlane", "runtime-defaults")));
   await assert.rejects(readdir(join(claudeHome, ".orbitlane", "hook")));
   assert.equal(await readFile(heartbeatPath, "utf8"), "{}\n");
+  assert.deepEqual(await readFile(hmacKeyPath), hmacKey);
+});
+
+test("Claude HMAC keys remain stable across reinstall and Codex-only installs do not create one", async (t) => {
+  const { contractPath, claudeHome, env } = await isolated(t);
+  assert.equal((await invoke(["install", "--global", "--target", "codex", "--contract", contractPath], { env })).code, 0);
+  await assert.rejects(readFile(join(claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key")));
+  assert.equal((await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env })).code, 0);
+  const keyPath = join(claudeHome, ".orbitlane", "secrets", "telemetry-hmac.key");
+  const before = await readFile(keyPath);
+  assert.equal((await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env })).code, 0);
+  assert.deepEqual(await readFile(keyPath), before);
 });
 
 test("a project uninstall reclaims its own snapshot store too", async (t) => {

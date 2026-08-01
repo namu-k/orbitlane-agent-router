@@ -265,9 +265,11 @@ async function reclaimDerivedState(options, report) {
 }
 
 function prepareClaudeAssets(root) {
+  const keyPath = join(root, ".orbitlane", "secrets", "telemetry-hmac.key");
   return Object.freeze({
     managedAssets: [
       Object.freeze({ name: "runtime", kind: "directory", path: join(root, ".orbitlane", "hook"), sourcePath: join(PACKAGE_ROOT, "src"), packageJson: true }),
+      Object.freeze({ name: "telemetry-hmac-key", kind: "file", path: keyPath, mode: 0o600 }),
     ],
   });
 }
