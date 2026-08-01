@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-import { createHash, randomUUID } from "node:crypto";
-import { cp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, realpath, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createClaudeTier1Adapter } from "../src/adapters/claude/index.js";
 import { createCodexTier1Adapter } from "../src/adapters/codex/index.js";
 import { resolveTargetPaths } from "../src/config/paths.js";
-import { planSnapshot, writeSnapshot } from "../src/config/snapshots.js";
+import { planSnapshot } from "../src/config/snapshots.js";
 import { loadJsonSource } from "../src/config/source.js";
 import { resolveEffectiveContract } from "../src/guards/resolve-contract.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
@@ -27,36 +27,6 @@ function vendoredHookPath(root, filename = "claude-spawn-hook.js") {
     throw Object.assign(new Error(`UNSAFE_INSTALL_PATH: ${path} contains % which cmd would expand`), { code: "UNSAFE_INSTALL_PATH" });
   }
   return path;
-}
-
-async function vendorHookRuntime(root) {
-  const destination = join(root, ".orbitlane", "hook");
-  const staged = join(root, ".orbitlane", `.hook-${randomUUID()}`);
-  const retired = join(root, ".orbitlane", `.hook-retired-${randomUUID()}`);
-  try {
-    await cp(join(PACKAGE_ROOT, "src"), staged, { recursive: true });
-    // Both hook entrypoints are vendored together even before the installer owns the
-    // PostToolUse setting. This keeps the observer executable after an npx cache is
-    // evicted without prematurely registering a second hook tuple (Task 4 owns that).
-    await Promise.all(["claude-spawn-hook.js", "claude-usage-hook.js"].map((filename) => realpath(join(staged, "guards", filename))));
-    // The copy leaves the package's module scope behind. Without this the nearest
-    // ancestor package.json decides the module type, and in a project that declares
-    // CommonJS every import in the hook would fail.
-    await writeFile(join(staged, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`, "utf8");
-    // Swap by two renames rather than deleting the live runtime first. The already
-    // installed settings point at this path, so a guard launched during a recursive
-    // delete would find no hook at all; between two renames the gap is a single
-    // directory operation, and an interruption leaves the retired copy recoverable.
-    const replaced = await rename(destination, retired).then(() => true, (error) => {
-      if (error?.code === "ENOENT") return false;
-      throw error;
-    });
-    await rename(staged, destination);
-    if (replaced) await rm(retired, { recursive: true, force: true }).catch(() => {});
-  } catch (error) {
-    await rm(staged, { recursive: true, force: true }).catch(() => {});
-    throw error;
-  }
 }
 
 function usage() {
@@ -113,6 +83,7 @@ function hasAgentHook(settings, command) {
     .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
     .some((hook) => hook?.type === "command" && hook.command === command);
 }
+
 
 async function claudeTransitionAction(options, claudeGuardEnabled) {
   if (options.command !== "install" || (options.target !== "claude" && options.target !== "both")) return undefined;
@@ -250,6 +221,7 @@ function adapters(contract, options) {
       if (options.claudePreparationError !== undefined) throw options.claudePreparationError;
       result.claude = Object.freeze({ ...createClaudeTier1Adapter(contract, {
         ...claudePaths,
+        managedAssets: options.managedAssets,
         ...(options.claudeGuardEnabled === false ? {} : {
           spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
         }),
@@ -292,6 +264,14 @@ async function reclaimDerivedState(options, report) {
   }
 }
 
+function prepareClaudeAssets(root) {
+  return Object.freeze({
+    managedAssets: [
+      Object.freeze({ name: "runtime", kind: "directory", path: join(root, ".orbitlane", "hook"), sourcePath: join(PACKAGE_ROOT, "src"), packageJson: true }),
+    ],
+  });
+}
+
 async function uninstall(options, targetAdapters) {
   const report = await uninstallRouting({ target: options.target, adapters: targetAdapters });
   await reclaimDerivedState(options, report);
@@ -322,7 +302,6 @@ async function main() {
   const runtimeDefaults = runtimeDefaultsSource?.value;
   const claudeSelected = options.target === "claude" || options.target === "both";
   const persist = options.command === "install" && options.dryRun !== true && claudeSelected;
-  const store = persist ? writeSnapshot : (root, kind, content) => planSnapshot(root, kind, content);
 
   // Everything the Claude target needs before its adapter exists. A failure here is
   // carried into adapters() as that target's failure so a --target both run still
@@ -333,10 +312,16 @@ async function main() {
     try {
       const transitionAction = await claudeTransitionAction(options, claudeGuardEnabled);
       const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
-      if (persist && claudeGuardEnabled) await vendorHookRuntime(claudeRoot);
-      const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
-      const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
-      prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256, ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
+      const claudeAssets = claudeGuardEnabled ? prepareClaudeAssets(claudeRoot) : {};
+      const contractSnapshot = planSnapshot(claudeRoot, "contracts", contractSource.bytes);
+      const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : planSnapshot(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
+      const snapshotAssets = persist ? [
+        Object.freeze({ name: `contract-${contractSnapshot.sha256}`, kind: "file", path: contractSnapshot.path, content: contractSource.bytes, mode: 0o600 }),
+        ...(runtimeDefaultsSnapshot === undefined ? [] : [Object.freeze({ name: `runtime-defaults-${runtimeDefaultsSnapshot.sha256}`, kind: "file", path: runtimeDefaultsSnapshot.path, content: runtimeDefaultsSource.bytes, mode: 0o600 })]),
+      ] : [];
+      prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256,
+        managedAssets: persist ? [...snapshotAssets, ...(claudeGuardEnabled ? claudeAssets.managedAssets : [])] : [],
+        ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
     } catch (error) {
       prepared = { claudePreparationError: error };
     }

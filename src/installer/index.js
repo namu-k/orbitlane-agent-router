@@ -365,7 +365,7 @@ async function installOne(contract, target, adapter, hooks) {
       const rendered = adapter.render(contract);
       return installDiff(target, instruction, generated, settings, { ...rendered, transitionAction: adapter.transitionAction });
     },
-    isUnchanged: (diff, generated, settings) => diff.instruction.before === diff.instruction.after && generated.exists && diff.generated.before === diff.generated.after && (settings === null || diff.settings.before === diff.settings.after),
+    isUnchanged: (diff, generated, settings) => diff.instruction.before === diff.instruction.after && generated.exists && diff.generated.before === diff.generated.after && (settings === null || diff.settings.before === diff.settings.after) && managedAssets(adapter).length === 0,
     stage: async (transactionPath, diff, instruction, generated, settings) => {
       await writeStaged(join(transactionPath, "instruction.stage"), diff.instruction.after, instruction.mode);
       await writeStaged(join(transactionPath, "generated.stage"), diff.generated.after, generated.mode);

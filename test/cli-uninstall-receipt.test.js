@@ -111,6 +111,7 @@ test("a successful uninstall reclaims the snapshot store but keeps the heartbeat
   assert.equal(result.code, 0);
   await assert.rejects(readdir(join(claudeHome, ".orbitlane", "contracts")));
   await assert.rejects(readdir(join(claudeHome, ".orbitlane", "runtime-defaults")));
+  await assert.rejects(readdir(join(claudeHome, ".orbitlane", "hook")));
   assert.equal(await readFile(heartbeatPath, "utf8"), "{}\n");
 });
 
