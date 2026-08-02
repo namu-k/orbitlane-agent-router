@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
 import { auditClaudeSpawnGuard, evaluateClaudeAgentSpawn, runClaudeSpawnGuard } from "../../src/guards/claude-spawn.js";
@@ -135,54 +132,41 @@ test("declines to inject a model the Agent tool would reject rather than breakin
   });
 });
 
-test("allows a matching Claude Agent tool spawn and records an unproven heartbeat", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "orbitlane-guard-"));
-  const evidencePath = join(directory, "heartbeats.jsonl");
-  t.after(async () => { await import("node:fs/promises").then(({ rm }) => rm(directory, { recursive: true, force: true })); });
-
+test("allows a matching Claude Agent spawn when telemetry identifiers are unavailable", async () => {
   const result = await runClaudeSpawnGuard({
     input: { subagent_type: "executor", model: "claude-terra" },
     contract,
-    evidencePath,
-    correlationId: "nested-1",
     now: () => "2026-07-22T00:00:00.000Z",
   });
 
-  assert.deepEqual(result, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven", heartbeat_recorded: true });
-  assert.deepEqual(JSON.parse(await readFile(evidencePath, "utf8")), {
-    correlation_id: "nested-1",
-    decision: "allow",
-    effective_model: "unproven",
-    reason: "CONTRACT_MATCH",
-    routed_model: null,
-    injected_model: null,
-    timestamp: "2026-07-22T00:00:00.000Z",
-    selected_scope: null,
-    contract_sha256: null,
-    report_path: null,
-    resolver_policy_version: null,
-  });
+  assert.deepEqual(result, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven", telemetry_recorded: false });
 });
 
-test("records the routed model in the heartbeat so injection is auditable after the fact", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "orbitlane-guard-"));
-  const evidencePath = join(directory, "heartbeats.jsonl");
-  t.after(async () => { await import("node:fs/promises").then(({ rm }) => rm(directory, { recursive: true, force: true })); });
-
-  await runClaudeSpawnGuard({
+test("Pre guard appends a routing decision without a legacy heartbeat", async () => {
+  const entries = [];
+  const result = await runClaudeSpawnGuard({
     input: { subagent_type: "executor" },
     contract: contractFor("haiku"),
-    evidencePath,
-    correlationId: "injected-1",
-    now: () => "2026-07-22T00:00:00.000Z",
+    scope: "project",
+    contractSha256: "c".repeat(64),
+    resolverPolicyVersion: 1,
+    telemetryRoot: "/unused",
+    collectorInstanceRef: "collector-1",
+    telemetryKey: "test-key",
+    identifiers: { session: "session-1", turn: "turn-1", invocation: "invoke-1" },
+    policyProvenance: { policy_projection_sha256: "e".repeat(64), projected_guidance_bytes: 64 },
+    appendTelemetry: async (entry) => { entries.push(entry); return { written: true }; },
+    now: () => "2026-07-29T00:00:00.000Z",
   });
 
-  const heartbeat = JSON.parse(await readFile(evidencePath, "utf8"));
-  assert.equal(heartbeat.reason, "ROUTED_MODEL_INJECTED");
-  assert.equal(heartbeat.routed_model, "haiku");
-  assert.equal(heartbeat.injected_model, "haiku");
-  // Rewriting the request still proves nothing about what ran.
-  assert.equal(heartbeat.effective_model, "unproven");
+  assert.equal(result.telemetry_recorded, true);
+  assert.equal("heartbeat_recorded" in result, false);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].event_kind, "routing.decision");
+  assert.equal(entries[0].routing.reason, "ROUTED_MODEL_INJECTED");
+  assert.equal(entries[0].provenance.policy_projection_sha256.length, 64);
+  assert.equal(entries[0].provenance.projected_guidance_bytes > 0, true);
+  assert.equal("report_path" in entries[0], false);
 });
 
 test("reads the tool's own model first when a secondary override field is also present", () => {
@@ -241,12 +225,13 @@ test("still denies a detectable override on an unmanaged role's routed collision
   });
 });
 
-test("keeps the decision when heartbeat recording fails and keeps unroutable input denied", async () => {
-  const allowed = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "claude-terra" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
-  assert.deepEqual(allowed, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven", heartbeat_recorded: false });
+test("keeps the routing decision when telemetry storage fails", async () => {
+  const telemetry = { scope: "project", contractSha256: "c".repeat(64), collectorInstanceRef: "collector-1", telemetryKey: "test-key", identifiers: { session: "session-1", turn: "turn-1", invocation: "invoke-1" }, policyProvenance: { policy_projection_sha256: "e".repeat(64), projected_guidance_bytes: 64 }, appendTelemetry: async () => { throw new Error("disk error"); } };
+  const allowed = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "claude-terra" }, contract, ...telemetry });
+  assert.deepEqual(allowed, { exitCode: 0, decision: "allow", reason: "CONTRACT_MATCH", effective_model: "unproven", telemetry_recorded: false });
 
-  const retained = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "wrong" }, contract, appendHeartbeat: async () => { throw new Error("disk error"); } });
-  assert.deepEqual(retained, { exitCode: 0, decision: "allow", reason: "EXPLICIT_MODEL_RETAINED", effective_model: "unproven", declared_model: "wrong", routed_model: "claude-terra", heartbeat_recorded: false });
+  const retained = await runClaudeSpawnGuard({ input: { subagent_type: "executor", model: "wrong" }, contract, ...telemetry });
+  assert.deepEqual(retained, { exitCode: 0, decision: "allow", reason: "EXPLICIT_MODEL_RETAINED", effective_model: "unproven", declared_model: "wrong", routed_model: "claude-terra", telemetry_recorded: false });
 
   // A call with no role name cannot be routed or classified, so it stays denied.
   assert.deepEqual(evaluateClaudeAgentSpawn({ input: null, contract }), { exitCode: 2, decision: "deny", reason: "INVALID_AGENT_TOOL_INPUT", effective_model: "unproven" });

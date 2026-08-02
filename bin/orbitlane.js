@@ -225,7 +225,7 @@ function adapters(contract, options) {
         ...claudePaths,
         managedAssets: options.managedAssets,
         ...(options.claudeGuardEnabled === false ? {} : {
-          spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+          spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "evidence", options.global === true ? "global" : "project", "routing-decisions.v1.jsonl"), options.global === true ? "global" : "project", join(generated, "evidence", options.global === true ? "global" : "project"), options.collectorInstanceRef ?? "preflight"),
           usageObserverCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root, "claude-usage-hook.js"), join(generated, "evidence", options.global === true ? "global" : "project", "execution-usage.v1.jsonl"), options.global === true ? "global" : "project", options.collectorInstanceRef ?? "preflight"),
           installedScope: options.global === true ? "global" : "project",
           telemetryRoot: resolved.claude.root,

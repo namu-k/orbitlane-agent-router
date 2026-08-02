@@ -237,12 +237,13 @@ test("release-gate dry run executes the packed CLI, scoped guard, and rollback l
   assert.ok(performance.now() - cliStart < 2000, `initial CLI=${performance.now() - cliStart}ms`);
 
   const configDir = resolve(directory, "claude-config");
-  const evidencePath = resolve(directory, "heartbeat.jsonl");
+  const evidencePath = resolve(directory, "routing-decision.jsonl");
   const { writeSnapshot } = await import(pathToFileURL(resolve(installedRoot, "src", "config", "snapshots.js")).href);
   const snapshot = await writeSnapshot(configDir, "contracts", `${JSON.stringify(contract)}\n`);
-  await mkdir(resolve(configDir, ".orbitlane"), { recursive: true });
-  await writeFile(resolve(configDir, ".orbitlane", "claude-report.json"), `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: snapshot.sha256 } })}\n`);
-  await run(process.execPath, [resolve(installedRoot, "src", "guards", "claude-spawn-hook.js"), configDir, evidencePath], JSON.stringify({ tool_name: "Agent", tool_use_id: "release-gate", tool_input: { subagent_type: "executor", model: "claude-terra" } }));
+  await mkdir(resolve(configDir, ".orbitlane", "secrets"), { recursive: true });
+  await writeFile(resolve(configDir, ".orbitlane", "secrets", "telemetry-hmac.key"), "release-gate-key", { mode: 0o600 });
+  await writeFile(resolve(configDir, ".orbitlane", "claude-report.json"), `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: snapshot.sha256 }, policy_provenance: { policy_projection_sha256: "e".repeat(64), projected_guidance_bytes: 64 } })}\n`);
+  await run(process.execPath, [resolve(installedRoot, "src", "guards", "claude-spawn-hook.js"), configDir, evidencePath, "project", resolve(directory, "evidence"), "release-gate"], JSON.stringify({ session_id: "session", turn_id: "turn", tool_name: "Agent", tool_use_id: "release-gate", tool_input: { subagent_type: "executor", model: "claude-terra" } }));
   assert.match(await readFile(evidencePath, "utf8"), /CONTRACT_MATCH/);
 
   const installer = await import(pathToFileURL(resolve(installedRoot, "src", "installer", "index.js")).href);

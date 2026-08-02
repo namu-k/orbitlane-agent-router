@@ -1,11 +1,13 @@
 import { RESOLVER_POLICY_VERSION, resolveEffectiveContract } from "./resolve-contract.js";
 import { runClaudeSpawnGuard } from "./claude-spawn.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 const decodeArgument = (value) => typeof value === "string" && value.startsWith("base64:")
   ? Buffer.from(value.slice("base64:".length), "base64").toString("utf8")
   : value;
 
-const [claudeConfigDir, evidencePath, installedScopeArgument] = process.argv.slice(2).map(decodeArgument);
+const [claudeConfigDir, evidencePath, installedScopeArgument, telemetryRoot, collectorInstanceRef] = process.argv.slice(2).map(decodeArgument);
 
 // Which layer installed this hook. Distinct from the scope the resolver selects at
 // run time: a project hook whose own report is gone falls back to "global" selection
@@ -48,16 +50,20 @@ if (payload !== undefined) {
       resolved = undefined;
     }
     if (resolved !== undefined) {
+      let telemetryKey;
+      try { telemetryKey = await readFile(join(claudeConfigDir, ".orbitlane", "secrets", "telemetry-hmac.key")); } catch {}
       const result = await runClaudeSpawnGuard({
         input: { ...(payload.tool_input ?? payload), environment_model: process.env.CLAUDE_CODE_SUBAGENT_MODEL },
         contract: resolved.contract,
         runtimeDefaults: resolved.runtimeDefaults,
-        evidencePath,
-        correlationId: payload.tool_use_id ?? null,
         scope: resolved.scope,
         contractSha256: resolved.contractSha256,
-        reportPath: resolved.reportPath,
+        policyProvenance: resolved.policyProvenance,
         resolverPolicyVersion: RESOLVER_POLICY_VERSION,
+        telemetryRoot: evidencePath,
+        collectorInstanceRef,
+        telemetryKey,
+        identifiers: { session: payload.session_id, turn: payload.turn_id, invocation: payload.tool_use_id },
       });
       if (result.exitCode === 2) process.stderr.write(`${result.reason} selected_scope=${resolved.scope} installed_scope=${installedScope ?? "unknown"} report_path=${resolved.reportPath}\n`);
       else if (typeof result.injected_model === "string") {

@@ -28,20 +28,21 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const configDir = join(directory, ".claude");
   const written = await writeSnapshot(configDir, "contracts", `${JSON.stringify(contract)}\n`);
-  await mkdir(join(configDir, ".orbitlane"), { recursive: true });
+  await mkdir(join(configDir, ".orbitlane", "secrets"), { recursive: true });
+  await writeFile(join(configDir, ".orbitlane", "secrets", "telemetry-hmac.key"), "test-key", { mode: 0o600 });
   await writeFile(
     join(configDir, ".orbitlane", "claude-report.json"),
-    `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: written.sha256 } })}\n`,
+    `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: written.sha256 }, policy_provenance: { policy_projection_sha256: "e".repeat(64), projected_guidance_bytes: 64 } })}\n`,
     "utf8",
   );
   return { directory, configDir, evidencePath: join(configDir, ".orbitlane", "claude-heartbeats.jsonl") };
 }
 
 async function invoke({ configDir, evidencePath, payload, cwd, installedScope, env }) {
-  const args = installedScope === undefined ? [hook, configDir, evidencePath] : [hook, configDir, evidencePath, installedScope];
+  const args = installedScope === undefined ? [hook, configDir, evidencePath, "project", join(configDir, ".orbitlane", "evidence", "project"), "collector-1"] : [hook, configDir, evidencePath, installedScope, join(configDir, ".orbitlane", "evidence", installedScope), "collector-1"];
   // env is per-invocation so a subagent-model override cannot leak into other cases.
   const child = execFileAsync(process.execPath, args, { cwd, encoding: "utf8", ...(env === undefined ? {} : { env }) });
-  child.child.stdin.end(JSON.stringify(payload));
+  child.child.stdin.end(JSON.stringify({ session_id: "session-1", turn_id: "turn-1", ...payload }));
   try {
     const { stdout, stderr } = await child;
     return { code: 0, stdout, stderr };
@@ -72,7 +73,7 @@ test("a matching Agent spawn is allowed", async (t) => {
   assert.equal(result.code, 0);
 });
 
-test("an unmanaged Agent spawn passes through and is logged", async (t) => {
+test("an unmanaged Agent spawn passes through and records a routing decision", async (t) => {
   const { directory, configDir, evidencePath } = await fixture(t);
   const result = await invoke({
     configDir,
@@ -82,6 +83,7 @@ test("an unmanaged Agent spawn passes through and is logged", async (t) => {
   });
   assert.equal(result.code, 0);
   const { readFile } = await import("node:fs/promises");
+  assert.match(await readFile(evidencePath, "utf8"), /"event_kind":"routing.decision"/);
   assert.match(await readFile(evidencePath, "utf8"), /"reason":"UNMANAGED_ROLE"/);
 });
 
@@ -98,7 +100,7 @@ test("a diverging Agent spawn is allowed and recorded rather than denied", async
   assert.match(await readFile(evidencePath, "utf8"), /"reason":"EXPLICIT_MODEL_RETAINED"/);
 });
 
-test("a CLAUDE_CODE_SUBAGENT_MODEL override is what the heartbeat names, not the call", async (t) => {
+test("a CLAUDE_CODE_SUBAGENT_MODEL override is what the routing decision names, not the call", async (t) => {
   const { directory, configDir, evidencePath } = await fixture(t);
   const result = await invoke({
     configDir,
@@ -112,10 +114,10 @@ test("a CLAUDE_CODE_SUBAGENT_MODEL override is what the heartbeat names, not the
 
   assert.equal(result.code, 0);
   const { readFile } = await import("node:fs/promises");
-  const heartbeat = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
-  assert.equal(heartbeat.reason, "EXPLICIT_MODEL_RETAINED");
-  assert.equal(heartbeat.routed_model, "claude-terra");
-  assert.equal(heartbeat.injected_model, null);
+  const decision = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
+  assert.equal(decision.routing.reason, "EXPLICIT_MODEL_RETAINED");
+  assert.equal(decision.routing.routed_model, "claude-terra");
+  assert.equal(decision.routing.injected_model, null);
 });
 
 test("an inherit override stops the rewrite reaching stdout", async (t) => {
@@ -124,7 +126,7 @@ test("an inherit override stops the rewrite reaching stdout", async (t) => {
   const written = await writeSnapshot(configDir, "contracts", `${JSON.stringify(injectable)}\n`);
   await writeFile(
     join(configDir, ".orbitlane", "claude-report.json"),
-    `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: written.sha256 } })}\n`,
+    `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: written.sha256 }, policy_provenance: { policy_projection_sha256: "e".repeat(64), projected_guidance_bytes: 64 } })}\n`,
     "utf8",
   );
 
@@ -140,9 +142,9 @@ test("an inherit override stops the rewrite reaching stdout", async (t) => {
   // Nothing on stdout means no updatedInput: the call reaches the runtime untouched.
   assert.equal(result.stdout.trim(), "");
   const { readFile } = await import("node:fs/promises");
-  const heartbeat = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
-  assert.equal(heartbeat.reason, "ROUTED_MODEL_WITHHELD_INHERIT");
-  assert.equal(heartbeat.injected_model, null);
+  const decision = JSON.parse((await readFile(evidencePath, "utf8")).trim().split("\n").at(-1));
+  assert.equal(decision.routing.reason, "ROUTED_MODEL_WITHHELD_INHERIT");
+  assert.equal(decision.routing.injected_model, null);
 });
 
 test("an unspecified model is rewritten to the routed model on stdout", async (t) => {
@@ -181,6 +183,7 @@ test("an unresolvable report denies and names the scope and report path", async 
     evidencePath,
     payload: { tool_name: "Agent", tool_input: { subagent_type: "executor", model: "claude-terra" } },
     cwd: directory,
+    installedScope: "global",
   });
   assert.equal(result.code, 2);
   assert.match(result.stderr, /REPORT_UNREADABLE/);

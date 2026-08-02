@@ -23,9 +23,10 @@ async function ephemeralCli(directory) {
 async function invoke(cliPath, args, options = {}) { try { const { stdout, stderr } = await execFileAsync(process.execPath, [cliPath, ...args], { ...options, encoding: "utf8" }); return { code: 0, stdout, stderr }; } catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr }; } }
 
 async function spawnAgent(root, model, scope) {
-  const args = [join(root, ".orbitlane", "hook", "guards", "claude-spawn-hook.js"), root, join(root, ".orbitlane", "claude-heartbeats.jsonl"), scope];
+  const report = JSON.parse(await readFile(join(root, ".orbitlane", "claude-report.json"), "utf8"));
+  const args = [join(root, ".orbitlane", "hook", "guards", "claude-spawn-hook.js"), root, join(root, ".orbitlane", "evidence", scope, "routing-decisions.v1.jsonl"), scope, join(root, ".orbitlane", "evidence", scope), report.receipt.collector_instance_ref];
   const child = execFileAsync(process.execPath, args, { cwd: root, encoding: "utf8" });
-  child.child.stdin.end(JSON.stringify({ tool_name: "Agent", tool_use_id: "vendored-1", tool_input: { subagent_type: "executor", model } }));
+  child.child.stdin.end(JSON.stringify({ session_id: "session-1", turn_id: "turn-1", tool_name: "Agent", tool_use_id: "vendored-1", tool_input: { subagent_type: "executor", model } }));
   try { const { stdout, stderr } = await child; return { code: 0, stdout, stderr }; } catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
 }
 
@@ -37,10 +38,8 @@ async function observeUsage(root, payload, scope) {
   try { const { stdout, stderr } = await child; return { code: 0, stdout, stderr, telemetryPath }; } catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr, telemetryPath }; }
 }
 
-// The vendored hook no longer proves it resolved a contract by denying, so the
-// heartbeat is what shows the copied runtime read the contract and routed the role.
-async function heartbeat(root) {
-  return readFile(join(root, ".orbitlane", "claude-heartbeats.jsonl"), "utf8");
+async function decisions(root, scope) {
+  return readFile(join(root, ".orbitlane", "evidence", scope, "routing-decisions.v1.jsonl"), "utf8");
 }
 
 test("a global Claude guard installed from an evicted npx cache still decides", async (t) => {
@@ -53,7 +52,7 @@ test("a global Claude guard installed from an evicted npx cache still decides", 
   assert.equal((await spawnAgent(claudeHome, "claude-terra", "global")).code, 0);
   const diverging = await spawnAgent(claudeHome, "other-model", "global");
   assert.equal(diverging.code, 0);
-  assert.match(await heartbeat(claudeHome), /"reason":"EXPLICIT_MODEL_RETAINED"/);
+  assert.match(await decisions(claudeHome, "global"), /"reason":"EXPLICIT_MODEL_RETAINED"/);
 });
 
 test("a project Claude guard survives eviction of the package that installed it", async (t) => {
@@ -66,7 +65,7 @@ test("a project Claude guard survives eviction of the package that installed it"
 
   assert.equal((await spawnAgent(projectRoot, "claude-terra", "project")).code, 0);
   assert.equal((await spawnAgent(projectRoot, "other-model", "project")).code, 0);
-  assert.match(await heartbeat(projectRoot), /"reason":"EXPLICIT_MODEL_RETAINED"/);
+  assert.match(await decisions(projectRoot, "project"), /"reason":"EXPLICIT_MODEL_RETAINED"/);
 });
 
 test("the vendored PostToolUse observer works from a config root with spaces after package eviction", async (t) => {

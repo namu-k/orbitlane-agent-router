@@ -160,7 +160,7 @@ test("CLI encodes the guard arguments it controls before placing them in a shell
   // from the config root, the evidence path or the scope reaches the shell verbatim.
   // Quoting differs per platform: POSIX single-quotes, cmd double-quotes.
   const [, , ...encoded] = command.match(/'(?:[^']|'"'"')*'|"(?:[^"])*"/g) ?? [];
-  assert.equal(encoded.length, 3);
+  assert.equal(encoded.length, 5);
   for (const argument of encoded) assert.match(argument, /^(['"])base64:[A-Za-z0-9+/=]+\1$/);
 });
 
