@@ -1,0 +1,1 @@
+{"event_id":"routing-only","event_kind":"routing.decision","observed_at":"2026-08-02T00:00:03Z","scope":{"collector_instance_ref":"collector-routing"},"links":{"quality":"none","invocation_ref":null},"routing":{"injected_model":"claude-sonnet-5"}}

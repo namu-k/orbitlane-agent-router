@@ -1,0 +1,1 @@
+{"event_id":"partial-decision","event_kind":"routing.decision","observed_at":"2026-08-02T00:00:03Z","scope":{"collector_instance_ref":"collector-partial"},"links":{"quality":"none","invocation_ref":null},"routing":{"injected_model":"claude-sonnet-5"}}
