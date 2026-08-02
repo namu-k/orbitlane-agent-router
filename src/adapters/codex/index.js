@@ -39,6 +39,7 @@ export function resolveCodexRequestedRoutes(contract, runtimeDefaults) {
 
 export function createCodexTier1Adapter(contract, options) {
   const routes = resolveCodexRequestedRoutes(contract, options.runtimeDefaults);
+  const mainLane = resolveLaneModels(contract, "codex", options.runtimeDefaults).sol;
   const audit = auditInstalledRoles(contract, options.installedRoles ?? []);
   return Object.freeze({
     instructionPath: options.instructionPath,
@@ -54,6 +55,12 @@ export function createCodexTier1Adapter(contract, options) {
           configuration_enforced: false,
           semantic_policy_audited: true,
           role_binding_enforced: false,
+          ...(mainLane?.resolved === true ? { baseline_binding: {
+            lane: "sol",
+            configured_model: mainLane.model,
+            evidence: "contract-configured",
+            effective_model: "unproven",
+          } } : {}),
           requested_routes: Object.fromEntries(Object.entries(routes).map(([role, route]) => [role, {
             requested_model: route.model,
             resolution: route.modelSource,

@@ -3,9 +3,9 @@ import test from "node:test";
 
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 
-import { allocateRootUsage, loadCodexEvidence, normalizeCodexRollouts } from "../../src/estimate/codex.js";
+import { allocateRootUsage, isCanonicalDescendant, loadCodexEvidence, normalizeCodexRollouts } from "../../src/estimate/codex.js";
 
 const usage = { input_tokens: "100", cached_input_tokens: "20", output_tokens: "30", total_tokens: "150" };
 
@@ -62,6 +62,50 @@ test("fallback resolves a model-less agent_type through the Codex role contract 
   const evidence = normalizeCodexRollouts({ root: { id: "root", usage, models: [] }, children: [], spawnObservations: [{ model: null, agent_type: "executor" }], contract: { roles: { executor: { lane: "terra" } }, targets: { codex: { lanes: { terra: { model: "gpt-5.6-terra" } } } } } });
   assert.equal(evidence.usage_by_model[0].model, "gpt-5.6-terra");
   assert.equal(evidence.usage_by_model[0].model_source, "inferred");
+  assert.equal(evidence.model_evidence, "inferred");
+});
+
+test("canonical containment accepts Windows descendants and rejects sibling prefixes", () => {
+  const pathApi = { relative: win32.relative, isAbsolute: win32.isAbsolute };
+  assert.equal(isCanonicalDescendant("C:\\codex\\sessions", "C:\\codex\\sessions\\root.jsonl", pathApi), true);
+  assert.equal(isCanonicalDescendant("C:\\codex\\sessions", "C:\\codex\\sessions-other\\root.jsonl", pathApi), false);
+});
+
+test("linked children without usable usage remain in integrity diagnostics", () => {
+  const evidence = normalizeCodexRollouts({
+    root: { id: "root", corrupt: 1, total_lines: 2 },
+    children: [
+      { id: "valid", parent_thread_id: "root", models: ["gpt-5.6-terra"], usage, corrupt: 0, total_lines: 1 },
+      { id: "invalid", parent_thread_id: "root", models: ["gpt-5.6-luna"], corrupt: 1, total_lines: 3 },
+    ],
+  });
+  assert.equal(evidence.corrupt_lines, 2);
+  assert.equal(evidence.total_lines, 6);
+});
+
+test("equal-timestamp duplicate children use a deterministic tie-breaker and warn", () => {
+  const root = { id: "root" };
+  const olderPath = { id: "child", parent_thread_id: "root", models: ["gpt-5.6-terra"], usage, timestamp: 1, file: "/evidence/a.jsonl" };
+  const newerPath = { ...olderPath, usage: { ...usage, total_tokens: "300" }, file: "/evidence/b.jsonl" };
+  const evidence = normalizeCodexRollouts({ root, children: [newerPath, olderPath] });
+  assert.equal(evidence.usage_by_model[0].usage.total_tokens, "150");
+  assert.match(evidence.warnings.join("\n"), /DUPLICATE_CHILD_TIE/);
+});
+
+test("a production-shaped Codex report supplies only a configured contract baseline", async (t) => {
+  const project = await mkdtemp(join(tmpdir(), "orbitlane-estimate-codex-contract-"));
+  const sessions = join(project, "codex-home", "sessions");
+  await mkdir(sessions, { recursive: true });
+  await mkdir(join(project, ".orbitlane"), { recursive: true });
+  await writeFile(join(project, ".orbitlane", "codex-report.json"), `${JSON.stringify({
+    baseline_binding: { lane: "sol", configured_model: "gpt-5.6-sol", evidence: "contract-configured", effective_model: "unproven" },
+    requested_routes: {},
+  })}\n`);
+  await writeFile(join(sessions, "root.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "root", cwd: project, thread_source: "user" } })}\n`);
+  await writeFile(join(sessions, "child.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "child", parent_thread_id: "root", cwd: project, thread_source: "subagent" } })}\n${JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.6-terra" } })}\n${JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 0, total_tokens: 1 } } } })}\n`);
+  t.after(async () => { await import("node:fs/promises").then(({ rm }) => rm(project, { recursive: true, force: true })); });
+  const evidence = await loadCodexEvidence({ cwd: project, env: { CODEX_HOME: join(project, "codex-home") } });
+  assert.equal(evidence.contract_main_model, "gpt-5.6-sol");
 });
 
 test("latest selects the newest canonical-cwd root and explicit IDs reject ambiguity", async (t) => {

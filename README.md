@@ -99,7 +99,7 @@ Create a local, baseline-relative cost estimate without a network call:
 orbitlane estimate --runtime <auto|claude|codex> [--session <latest|thread-id|path>] [--baseline-model <model>] [--prices <catalog.json>] --output <report.json>
 ```
 
-Claude reads project evidence from `.orbitlane/evidence/project` for `latest` and can read an explicit evidence file or directory. Codex reads `CODEX_HOME/sessions`; `latest` selects the matching user rollout for the current project and includes linked child rollouts. The bundled catalog is labelled `heuristic`; use `--prices` to supply a local custom catalog.
+Claude reads project evidence from `.orbitlane/evidence/project` for `latest` and can read an explicit evidence file or directory. Codex reads `CODEX_HOME/sessions`; `latest` selects the newest matching user rollout for the current project and includes linked child rollouts, while an explicit Codex thread ID or rollout path selects only that runtime's evidence. `--runtime auto` accepts only the omitted or `latest` session selection. The bundled catalog is labelled `heuristic`; use `--prices` to supply a local custom catalog.
 
 High, Medium, Low, and Insufficient confidence use score bands of 80+, 55–79, 35–54, and below 35. Codex estimates are capped at 65. A positive difference means the selected baseline costs more than the routed-model estimate, zero means equal, and a negative difference means the routed-model estimate costs more. Insufficient data is shown as `데이터 부족` with null money values.
 

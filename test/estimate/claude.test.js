@@ -54,6 +54,19 @@ test("routing evidence without usage stays non-monetary", async () => {
   assert.equal(evidence.attribution_evidence, "guidance-only");
 });
 
+test("mixed resolved and inferred Claude model buckets retain inferred evidence", () => {
+  const units = { input_tokens: 1, cache_read_input_tokens: 0, cache_write_5m_input_tokens: 0, cache_write_1h_input_tokens: 0, output_tokens: 1, web_search_requests: 0, web_fetch_requests: 0 };
+  const scope = { collector_instance_ref: "collector" };
+  const evidence = normalizeClaudeEvents({
+    decisions: [{ event_kind: "routing.decision", scope, observed_at: "2026-08-02T00:00:00Z", links: { quality: "exact", invocation_ref: "inferred" }, routing: { injected_model: "claude-haiku-4-5-20251001" } }],
+    usages: [
+      { event_kind: "execution.usage", scope, observed_at: "2026-08-02T00:00:01Z", usage: { resolved_model: "claude-sonnet-5", total_tokens: 2, billing_units: units } },
+      { event_kind: "execution.usage", scope, observed_at: "2026-08-02T00:00:02Z", links: { quality: "exact", invocation_ref: "inferred" }, usage: { total_tokens: 2, billing_units: units } },
+    ],
+  });
+  assert.equal(evidence.model_evidence, "inferred");
+});
+
 test("an explicit file is isolated from sibling routing evidence", async () => {
   const project = await fixtureProject("detailed-exact");
   const evidence = await loadClaudeEvidence({ cwd: project, session: join(project, ".orbitlane", "evidence", "project", "execution-usage.v1.jsonl") });

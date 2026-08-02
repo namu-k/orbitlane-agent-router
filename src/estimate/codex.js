@@ -1,6 +1,8 @@
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir as osHomedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+
+import { reduceModelEvidence } from "./evidence.js";
 
 const KEYS = ["input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"];
 const decimal = (value) => typeof value === "string" && /^(?:0|[1-9]\d*)$/.test(value);
@@ -18,6 +20,22 @@ function add(left, right) { for (const key of KEYS) left[key] += right[key]; ret
 function render(value) { return Object.fromEntries(KEYS.map((key) => [key, value[key].toString()])); }
 function halfUp(numerator, denominator) { return (numerator + denominator / 2n) / denominator; }
 function modelBucket(model, usage, source = "observed") { return { model, model_source: source, usage: render(usage) }; }
+
+export function isCanonicalDescendant(root, candidate, pathApi = { relative, isAbsolute }) {
+  const remainder = pathApi.relative(root, candidate);
+  return remainder !== "" && !/^\.\.(?:[\\/]|$)/.test(remainder) && !pathApi.isAbsolute(remainder);
+}
+
+function childTieKey(child) {
+  if (typeof child?.file === "string") return child.file;
+  return JSON.stringify({ models: child?.models ?? [], usage: child?.usage ?? null, corrupt: child?.corrupt ?? 0, total_lines: child?.total_lines ?? 0 });
+}
+
+function newerChild(left, right) {
+  const leftTimestamp = Number.isFinite(Number(left?.timestamp)) ? Number(left.timestamp) : 0;
+  const rightTimestamp = Number.isFinite(Number(right?.timestamp)) ? Number(right.timestamp) : 0;
+  return rightTimestamp - leftTimestamp || childTieKey(left).localeCompare(childTieKey(right));
+}
 
 export function allocateRootUsage({ usage, observedSpawnCount, modelSpawnCounts }) {
   const root = vector(usage);
@@ -60,15 +78,22 @@ export function normalizeCodexRollouts({ root, children, spawnObservations = [],
   const rootModels = Array.isArray(root?.models) ? root.models.filter(safeToken) : [];
   const linkedById = new Map();
   for (const child of Array.isArray(children) ? children : []) {
-    if (child?.parent_thread_id !== root?.id || child?.usage === undefined || !safeToken(child?.id)) continue;
-    const prior = linkedById.get(child.id);
-    if (prior === undefined || (Number(child.timestamp) || 0) > (Number(prior.timestamp) || 0)) linkedById.set(child.id, child);
+    if (child?.parent_thread_id !== root?.id || !safeToken(child?.id)) continue;
+    const candidates = linkedById.get(child.id) ?? [];
+    candidates.push(child);
+    linkedById.set(child.id, candidates);
   }
-  const linked = [...linkedById.values()];
+  const linked = [...linkedById.values()].map((candidates) => {
+    const ordered = [...candidates].sort(newerChild);
+    if (ordered.length > 1 && Number(ordered[0].timestamp) === Number(ordered[1].timestamp)
+      && childTieKey(ordered[0]) !== childTieKey(ordered[1])) warnings.push("DUPLICATE_CHILD_TIE_RESOLVED");
+    return ordered[0];
+  });
   const buckets = [];
   const unknown = zero();
   let mixed = 0;
   for (const child of linked) {
+    if (child.usage === undefined) continue;
     const usage = vector(child.usage);
     const models = [...new Set((Array.isArray(child.models) ? child.models : []).filter(safeToken))];
     if (models.length !== 1) {
@@ -79,9 +104,9 @@ export function normalizeCodexRollouts({ root, children, spawnObservations = [],
     buckets.push(modelBucket(models[0], usage));
   }
   if (buckets.length > 0) {
-    return frozen({ runtime: "codex", source_kind: "codex-linked-children", usage_evidence: "detailed", model_evidence: "observed", attribution_evidence: "linked-child",
+    return frozen({ runtime: "codex", source_kind: "codex-linked-children", usage_evidence: "detailed", model_evidence: reduceModelEvidence(buckets), attribution_evidence: "linked-child",
       usage_by_model: frozen(buckets), unknown_model_usage: frozen(render(unknown)), observed_main_model: rootModels.length === 1 ? rootModels[0] : null,
-      contract_main_model: null, corrupt_lines: (root?.corrupt ?? 0) + linked.reduce((sum, child) => sum + (child.corrupt ?? 0), 0), total_lines: (root?.total_lines ?? 0) + linked.reduce((sum, child) => sum + (child.total_lines ?? 0), 0), warnings: frozen(warnings),
+      contract_main_model: safeToken(contract?.contract_main_model) ? contract.contract_main_model : null, corrupt_lines: (root?.corrupt ?? 0) + linked.reduce((sum, child) => sum + (child.corrupt ?? 0), 0), total_lines: (root?.total_lines ?? 0) + linked.reduce((sum, child) => sum + (child.total_lines ?? 0), 0), warnings: frozen(warnings),
       basis: frozen({ linked_child_count: buckets.length, excluded_mixed_model_children: mixed, rollout_contract_version: safeVersion(root?.cli_version) ? root.cli_version : "unknown" }) });
   }
   const rootUsage = root?.usage;
@@ -101,12 +126,12 @@ export function normalizeCodexRollouts({ root, children, spawnObservations = [],
     }
     const allocation = allocateRootUsage({ usage: rootUsage, observedSpawnCount: observations.length, modelSpawnCounts: counts });
     for (const bucket of allocation.usage_by_model) bucket.model_source = sources.get(bucket.model) ?? "observed";
-    return frozen({ runtime: "codex", source_kind: "codex-session-allocation", usage_evidence: "session", model_evidence: allocation.usage_by_model.length > 0 ? "observed" : "unknown", attribution_evidence: "spawn-allocation",
+    return frozen({ runtime: "codex", source_kind: "codex-session-allocation", usage_evidence: "session", model_evidence: reduceModelEvidence(allocation.usage_by_model), attribution_evidence: "spawn-allocation",
       usage_by_model: allocation.usage_by_model, unknown_model_usage: allocation.unknown_model_usage, observed_main_model: rootModels.length === 1 ? rootModels[0] : null,
-      contract_main_model: null, corrupt_lines: root?.corrupt ?? 0, total_lines: root?.total_lines ?? 0, warnings: frozen(warnings), basis: allocation });
+      contract_main_model: safeToken(contract?.contract_main_model) ? contract.contract_main_model : null, corrupt_lines: root?.corrupt ?? 0, total_lines: root?.total_lines ?? 0, warnings: frozen(warnings), basis: allocation });
   }
   return frozen({ runtime: "codex", source_kind: root ? "routing-only" : "none", usage_evidence: "none", model_evidence: "unknown", attribution_evidence: root ? "guidance-only" : "none",
-    usage_by_model: frozen([]), unknown_model_usage: frozen(render(unknown)), observed_main_model: rootModels.length === 1 ? rootModels[0] : null, contract_main_model: null,
+    usage_by_model: frozen([]), unknown_model_usage: frozen(render(unknown)), observed_main_model: rootModels.length === 1 ? rootModels[0] : null, contract_main_model: safeToken(contract?.contract_main_model) ? contract.contract_main_model : null,
     corrupt_lines: root?.corrupt ?? 0, total_lines: root?.total_lines ?? 0, warnings: frozen(warnings), basis: frozen({ linked_child_count: 0, excluded_mixed_model_children: mixed, rollout_contract_version: safeVersion(root?.cli_version) ? root.cli_version : "unknown" }) });
 }
 
@@ -120,6 +145,7 @@ function parseRollout(text, modifiedAt) {
   const models = [...new Set(records.filter((record) => record?.type === "turn_context" && safeToken(record.payload?.model)).map((record) => record.payload.model))];
   const token = records.filter((record) => record?.type === "event_msg" && record.payload?.type === "token_count").at(-1)?.payload?.info?.total_token_usage;
   const usage = token && KEYS.every((key) => Number.isSafeInteger(token[key]) && token[key] >= 0) ? Object.fromEntries(KEYS.map((key) => [key, String(token[key])])) : undefined;
+  if (token !== undefined && usage === undefined) corrupt += 1;
   const spawns = records.filter((record) => record?.type === "response_item" && record.payload?.type === "function_call" && record.payload?.name === "spawn_agent").map((record) => {
     try { const args = JSON.parse(record.payload.arguments); return { model: safeToken(args.model) ? args.model : null, agent_type: safeToken(args.agent_type) ? args.agent_type : null }; } catch { return { model: null, agent_type: null }; }
   });
@@ -140,7 +166,7 @@ async function parsedRollouts(files, allowedRoot) {
     const info = await lstat(file);
     if (!info.isFile() || info.isSymbolicLink()) throw Object.assign(new Error("CODEX_EVIDENCE_PATH_UNSAFE"), { code: "CODEX_EVIDENCE_PATH_UNSAFE" });
     const canonicalFile = await realpath(file);
-    if (!canonicalFile.startsWith(`${canonicalRoot}/`)) throw Object.assign(new Error("CODEX_EVIDENCE_PATH_UNSAFE"), { code: "CODEX_EVIDENCE_PATH_UNSAFE" });
+    if (!isCanonicalDescendant(canonicalRoot, canonicalFile)) throw Object.assign(new Error("CODEX_EVIDENCE_PATH_UNSAFE"), { code: "CODEX_EVIDENCE_PATH_UNSAFE" });
     const [text, details] = await Promise.all([readFile(file, "utf8"), stat(file)]);
     const rollout = parseRollout(text, details.mtimeMs);
     return rollout === null ? null : { ...rollout, file };
@@ -164,7 +190,12 @@ async function codexRouteContract(cwd) {
     try {
       const report = JSON.parse(await readFile(join(current, ".orbitlane", "codex-report.json"), "utf8"));
       const requested = report?.requested_routes;
-      if (requested && typeof requested === "object" && !Array.isArray(requested)) return Object.freeze({ requested_routes: requested });
+      const baseline = report?.baseline_binding;
+      if (requested && typeof requested === "object" && !Array.isArray(requested)) return Object.freeze({
+        requested_routes: requested,
+        ...(baseline?.lane === "sol" && baseline?.evidence === "contract-configured" && baseline?.effective_model === "unproven" && safeToken(baseline?.configured_model)
+          ? { contract_main_model: baseline.configured_model } : {}),
+      });
       return null;
     } catch (error) {
       if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR" && error?.name !== "SyntaxError") return null;

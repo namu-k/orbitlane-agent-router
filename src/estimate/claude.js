@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import { resolveEffectiveContract } from "../guards/resolve-contract.js";
 import { readJsonl } from "../telemetry/storage.js";
+import { reduceModelEvidence } from "./evidence.js";
 
 const DECISION_FILE = "routing-decisions.v1.jsonl";
 const USAGE_FILE = "execution-usage.v1.jsonl";
@@ -120,8 +121,7 @@ function normalized({ decisions, usages, corruptLines, totalLines, contractMainM
     },
   }));
   const usagePresent = usageByModel.length > 0 || unknown.total_tokens > 0n;
-  const modelEvidence = usageByModel.some((entry) => entry.model_source === "resolved") ? "resolved"
-    : usageByModel.some((entry) => entry.model_source === "inferred") ? "inferred" : "unknown";
+  const modelEvidence = reduceModelEvidence(usageByModel);
   const warnings = [];
   if (corruptLines > 0) warnings.push("CORRUPT_CLAUDE_EVIDENCE_LINES");
   if (serverToolRequests > 0) warnings.push("SERVER_TOOL_REQUESTS_EXCLUDED");
