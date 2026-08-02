@@ -2,6 +2,12 @@
 
 This project is pre-1.0, so breaking changes raise the minor version.
 
+## Unreleased
+
+### Added
+
+- Offline Claude and Codex confidence estimator with a local heuristic price catalog. No Codex hook or provider-price download was added.
+
 ## 0.3.0
 
 ### Migration from 0.2.0 — recommended, not required

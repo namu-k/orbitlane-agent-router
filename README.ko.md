@@ -91,6 +91,20 @@ npx orbitlane install --target both --contract <path>
 
 전역 package 설치나 WSL 전용 설정은 요구하지 않습니다.
 
+## 오프라인 신뢰도 추정기
+
+네트워크 호출 없이 baseline 대비 비용을 로컬에서 추정합니다.
+
+```bash
+orbitlane estimate --runtime <auto|claude|codex> --session <latest|thread-id|path> --baseline-model <model> --prices <catalog.json> --output <report.json>
+```
+
+Claude의 `latest`는 프로젝트 `.orbitlane/evidence/project` 증거를 읽고, 명시 경로는 증거 파일 또는 디렉터리로 읽을 수 있습니다. Codex는 `CODEX_HOME/sessions`를 읽으며 `latest`에서 현재 프로젝트와 일치하는 user rollout 및 연결된 child rollout을 선택합니다. 번들 가격표는 `heuristic`으로 표시되며, 로컬 사용자 가격표는 `--prices`로 지정합니다.
+
+신뢰도는 High(80 이상), Medium(60–79), Low(35–59), Insufficient(35 미만)로 구분하며 Codex는 65를 넘지 않습니다. 차이가 양수면 routed-model 추정치가 선택한 baseline보다 높고, 0이면 같으며, 음수면 낮습니다. 데이터가 부족하면 `데이터 부족`과 null 금액으로 표시합니다.
+
+This is a heuristic estimate, not a billing statement or proven net savings.
+
 ## 2-레이어 설치
 
 OrbitLane은 두 레이어로 설치한다. 두 런타임 모두 전역과 프로젝트 instruction 파일을

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
@@ -39,7 +39,7 @@ function run(command, args, input) {
 
 function runPackageCommand(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, shell: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env, shell: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -91,6 +91,8 @@ test("release package is allowlisted, private-free, and ships its CLI", async ()
   assert.match(manifest.version, /^\d+\.\d+\.\d+/, "a release requires a semver version");
   assert.deepEqual(manifest.files, ["bin/", "src/", "README.md", "README.ko.md"]);
   assert.ok(paths.includes("bin/orbitlane.js"));
+  assert.ok(paths.includes("src/estimate/default-prices.json"));
+  assert.ok(paths.includes("src/estimate/index.js"));
   assert.ok(paths.includes("src/guards/claude-spawn-hook.js"));
   assert.ok(paths.every((path) => !/(^|\/)(?:evidence|backups?|\.orbitlane-)/i.test(path)));
   assert.ok(paths.every((path) => !path.includes(privatePath)));
@@ -241,6 +243,15 @@ test("release-gate dry run executes the packed CLI, scoped guard, and rollback l
   const cliStart = performance.now();
   assert.match((await runPackageCommand("npx", ["--no-install", "--prefix", directory, "orbitlane", "--help"])).stdout, /Usage: orbitlane/);
   assert.ok(performance.now() - cliStart < 2000, `initial CLI=${performance.now() - cliStart}ms`);
+
+  const codexHome = resolve(directory, "sanitized-codex-home");
+  const sessions = resolve(codexHome, "sessions");
+  const estimateOutput = resolve(directory, "estimate-report.json");
+  await mkdir(sessions, { recursive: true });
+  await writeFile(resolve(sessions, "root.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "sanitized-root", cwd: directory, thread_source: "user" } })}\n${JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.6-sol" } })}\n`);
+  await writeFile(resolve(sessions, "child.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "sanitized-child", parent_thread_id: "sanitized-root", thread_source: "subagent" } })}\n${JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.6-terra" } })}\n${JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, total_tokens: 2 } } } })}\n`);
+  await execFileAsync(process.execPath, [cli, "estimate", "--runtime", "codex", "--baseline-model", "sol", "--output", estimateOutput], { encoding: "utf8", env: { ...process.env, CODEX_HOME: codexHome } });
+  assert.equal((await lstat(estimateOutput)).mode & 0o777, 0o600);
 
   const configDir = resolve(directory, "claude-config");
   const evidencePath = resolve(directory, "routing-decision.jsonl");

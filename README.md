@@ -91,6 +91,20 @@ npx orbitlane install --target both --contract <path>
 
 No global package installation or WSL-specific setup is required.
 
+## Offline confidence estimator
+
+Create a local, baseline-relative cost estimate without a network call:
+
+```bash
+orbitlane estimate --runtime <auto|claude|codex> --session <latest|thread-id|path> --baseline-model <model> --prices <catalog.json> --output <report.json>
+```
+
+Claude reads project evidence from `.orbitlane/evidence/project` for `latest` and can read an explicit evidence file or directory. Codex reads `CODEX_HOME/sessions`; `latest` selects the matching user rollout for the current project and includes linked child rollouts. The bundled catalog is labelled `heuristic`; use `--prices` to supply a local custom catalog.
+
+High, Medium, Low, and Insufficient confidence use score bands of 80+, 60–79, 35–59, and below 35. Codex estimates are capped at 65. A positive difference means the routed-model estimate is above the selected baseline, zero means equal, and a negative difference means below it. Insufficient data is shown as `데이터 부족` with null money values.
+
+This is a heuristic estimate, not a billing statement or proven net savings.
+
 ## Two-layer installation
 
 OrbitLane installs in two layers. Both runtimes merge their global and project
