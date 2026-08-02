@@ -64,6 +64,15 @@ export async function appendJsonl(path, event) {
   }
 }
 
+export async function readPrivateFile(path) {
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
+  assertCurrentOwner(info);
+  if ((info.mode & 0o077) !== 0) throw new Error("UNSAFE_TELEMETRY_PERMISSIONS");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try { return await handle.readFile(); } finally { await handle.close(); }
+}
+
 export async function readJsonl(path) {
   let content;
   try {

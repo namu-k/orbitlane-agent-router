@@ -1,6 +1,6 @@
 import { RESOLVER_POLICY_VERSION, resolveEffectiveContract } from "./resolve-contract.js";
 import { runClaudeSpawnGuard } from "./claude-spawn.js";
-import { readFile } from "node:fs/promises";
+import { readPrivateFile } from "../telemetry/storage.js";
 import { join } from "node:path";
 
 const decodeArgument = (value) => typeof value === "string" && value.startsWith("base64:")
@@ -51,7 +51,7 @@ if (payload !== undefined) {
     }
     if (resolved !== undefined) {
       let telemetryKey;
-      try { telemetryKey = await readFile(join(claudeConfigDir, ".orbitlane", "secrets", "telemetry-hmac.key")); } catch {}
+      try { telemetryKey = await readPrivateFile(join(claudeConfigDir, ".orbitlane", "secrets", "telemetry-hmac.key")); } catch {}
       const result = await runClaudeSpawnGuard({
         input: { ...(payload.tool_input ?? payload), environment_model: process.env.CLAUDE_CODE_SUBAGENT_MODEL },
         contract: resolved.contract,
