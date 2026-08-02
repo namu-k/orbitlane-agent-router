@@ -11,6 +11,10 @@ import { planSnapshot } from "../src/config/snapshots.js";
 import { loadJsonSource } from "../src/config/source.js";
 import { resolveEffectiveContract } from "../src/guards/resolve-contract.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
+import { loadClaudeEvidence } from "../src/estimate/claude.js";
+import { loadCodexEvidence } from "../src/estimate/codex.js";
+import { estimateRuntime } from "../src/estimate/index.js";
+import { combineEstimates, renderHumanSummary, writeSafeReport } from "../src/estimate/report.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = new Set(["codex", "claude", "both"]);
@@ -30,12 +34,28 @@ function vendoredHookPath(root, filename = "claude-spawn-hook.js") {
 }
 
 function usage() {
-  return "Usage: orbitlane <install|uninstall|recover> --target <codex|claude|both> --contract <path> [--global] [--config-root <path>] [--runtime-defaults <path>] [--dry-run]";
+  return "Usage: orbitlane <install|uninstall|recover> --target <codex|claude|both> --contract <path> [--global] [--config-root <path>] [--runtime-defaults <path>] [--dry-run]\n       orbitlane estimate --runtime <auto|claude|codex> [--session <latest|thread-id|path>] [--baseline-model <model>] [--prices <catalog.json>] --output <report.json>";
+}
+
+function parseEstimate(rest) {
+  const options = {};
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index];
+    if (!['--runtime', '--session', '--baseline-model', '--prices', '--output'].includes(token)) throw Object.assign(new TypeError(`UNKNOWN_OPTION: ${token}`), { code: 'UNKNOWN_OPTION' });
+    const value = rest[++index]; if (typeof value !== 'string' || value.startsWith('--') || options[token] !== undefined) throw Object.assign(new TypeError(`INVALID_ESTIMATE_OPTION: ${token}`), { code: 'INVALID_ESTIMATE_OPTION' });
+    options[token] = value;
+  }
+  if (!['auto', 'claude', 'codex'].includes(options['--runtime'])) throw Object.assign(new TypeError('RUNTIME_REQUIRED: auto, claude, or codex'), { code: 'RUNTIME_REQUIRED' });
+  if (options['--output'] === undefined) throw Object.assign(new TypeError('OUTPUT_REQUIRED'), { code: 'OUTPUT_REQUIRED' });
+  const session = options['--session'] ?? 'latest';
+  if (options['--runtime'] === 'auto' && session !== 'latest') throw Object.assign(new TypeError('AUTO_SESSION_MUST_BE_LATEST'), { code: 'AUTO_SESSION_MUST_BE_LATEST' });
+  return Object.freeze({ command: 'estimate', runtime: options['--runtime'], session, output: options['--output'], baselineModel: options['--baseline-model'] ?? null, prices: options['--prices'] });
 }
 
 function parse(argv) {
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0])) return Object.freeze({ command: "help" });
   const [command = "install", ...rest] = argv;
+  if (command === "estimate") return parseEstimate(rest);
   const options = {};
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -305,6 +325,15 @@ function exitCode(report) {
 async function main() {
   const options = parse(process.argv.slice(2));
   if (options.command === "help") return null;
+  if (options.command === "estimate") {
+    const catalog = options.prices === undefined ? JSON.parse(await readFile(join(PACKAGE_ROOT, "src", "estimate", "default-prices.json"), "utf8")) : (await loadJsonSource(options.prices)).value;
+    const selected = options.runtime === "auto" ? ["claude", "codex"] : [options.runtime];
+    const estimates = await Promise.all(selected.map(async (runtime) => estimateRuntime({ evidence: runtime === "claude" ? await loadClaudeEvidence({ cwd: process.cwd(), session: options.session }) : await loadCodexEvidence({ cwd: process.cwd(), session: options.session }), catalog, explicitBaselineModel: options.baselineModel })));
+    const report = combineEstimates({ catalog, estimates });
+    await writeSafeReport(resolve(options.output), report);
+    process.stdout.write(`${renderHumanSummary(report)}\n`);
+    return undefined;
+  }
   if (options.command === "recover") return recoverRouting({ manifest: { path: resolve(options.manifest) } });
   if (options.command === "uninstall") {
     return uninstall(options, await receiptAdapters(options));
@@ -352,7 +381,8 @@ async function main() {
 
 try {
   const report = await main();
-  if (report === null) process.stdout.write(`${usage()}\n`);
+  if (report === undefined) {}
+  else if (report === null) process.stdout.write(`${usage()}\n`);
   else {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     process.exitCode = exitCode(report);
