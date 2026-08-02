@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { allocateRootUsage, normalizeCodexRollouts } from "../../src/estimate/codex.js";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { allocateRootUsage, loadCodexEvidence, normalizeCodexRollouts } from "../../src/estimate/codex.js";
 
 const usage = { input_tokens: "100", cached_input_tokens: "20", output_tokens: "30", total_tokens: "150" };
 
@@ -37,4 +41,25 @@ test("root fallback allocates only the known model share", () => {
   assert.equal(result.known_model_share_denominator, "4");
   assert.equal(result.usage_by_model[0].usage.total_tokens, "38");
   assert.equal(result.unknown_model_usage.total_tokens, "112");
+});
+
+test("allocation distributes rounded units without manufacturing negative unknown usage", () => {
+  const result = allocateRootUsage({ usage: { input_tokens: "1", cached_input_tokens: "1", output_tokens: "1", total_tokens: "1" }, observedSpawnCount: 2, modelSpawnCounts: new Map([["gpt-5.6-luna", 1], ["gpt-5.6-terra", 1]]) });
+  assert.ok(BigInt(result.unknown_model_usage.total_tokens) >= 0n);
+  assert.equal(BigInt(result.usage_by_model.reduce((sum, entry) => sum + BigInt(entry.usage.total_tokens), 0n)) + BigInt(result.unknown_model_usage.total_tokens), 1n);
+});
+
+test("latest selects the newest canonical-cwd root and explicit IDs reject ambiguity", async (t) => {
+  const project = await mkdtemp(join(tmpdir(), "orbitlane-estimate-codex-"));
+  const sessions = join(project, "codex-home", "sessions");
+  await mkdir(sessions, { recursive: true });
+  const rollout = (id, timestamp, model, cwd = project) => `${JSON.stringify({ type: "session_meta", payload: { id, cwd, thread_source: "user", timestamp } })}\n${JSON.stringify({ type: "turn_context", payload: { model } })}\n`;
+  await writeFile(join(sessions, "old.jsonl"), rollout("old", "2026-08-02T00:00:00Z", "gpt-5.6-luna"));
+  await writeFile(join(sessions, "new.jsonl"), rollout("new", "2026-08-02T00:01:00Z", "gpt-5.6-terra"));
+  await writeFile(join(sessions, "duplicate-a.jsonl"), rollout("duplicate", "2026-08-02T00:02:00Z", "gpt-5.6-sol", join(project, "other")));
+  await writeFile(join(sessions, "duplicate-b.jsonl"), rollout("duplicate", "2026-08-02T00:03:00Z", "gpt-5.6-sol", join(project, "other")));
+  t.after(async () => { await import("node:fs/promises").then(({ rm }) => rm(project, { recursive: true, force: true })); });
+  const latest = await loadCodexEvidence({ cwd: project, env: { CODEX_HOME: join(project, "codex-home") } });
+  assert.equal(latest.observed_main_model, "gpt-5.6-terra");
+  await assert.rejects(loadCodexEvidence({ cwd: project, session: "duplicate", env: { CODEX_HOME: join(project, "codex-home") } }), /CODEX_THREAD_AMBIGUOUS/);
 });

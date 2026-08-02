@@ -13,11 +13,18 @@ import { resolveEffectiveContract } from "../src/guards/resolve-contract.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
 import { loadClaudeEvidence } from "../src/estimate/claude.js";
 import { loadCodexEvidence } from "../src/estimate/codex.js";
+import { resolveModelPrice, validatePriceCatalog } from "../src/estimate/pricing.js";
+import { scoreConfidence } from "../src/estimate/confidence.js";
 import { estimateRuntime } from "../src/estimate/index.js";
 import { combineEstimates, renderHumanSummary, writeSafeReport } from "../src/estimate/report.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = new Set(["codex", "claude", "both"]);
+
+function unavailableRuntimeEstimate(runtime) {
+  const confidence = scoreConfidence({ runtime, source_kind: "none", usage_evidence: "none", model_evidence: "unknown", attribution_evidence: "none", price_basis: "none", price_match: null, baseline_source: "unknown", baseline_known: false, priced_included_usage: "0", total_observed_usage: "0", corrupt_lines: 0, total_lines: 0 });
+  return Object.freeze({ runtime, status: "insufficient", raw_estimated_model_cost_difference_nanos: null, confidence_adjusted_reference_amount_nanos: null, display: "데이터 부족", confidence, baseline: Object.freeze({ status: "unknown", model: null, source: "unknown" }), coverage: confidence.coverage, models: Object.freeze([]), calculation_basis: Object.freeze({ price_basis: null, price_match: null }), warnings: Object.freeze(["RUNTIME_EVIDENCE_UNAVAILABLE"]) });
+}
 
 // The installed hook must keep working after the package that installed it is gone,
 // which is the normal end state for npx and dlx. Rather than storing an absolute path
@@ -328,10 +335,22 @@ async function main() {
   if (options.command === "estimate") {
     const catalog = options.prices === undefined ? JSON.parse(await readFile(join(PACKAGE_ROOT, "src", "estimate", "default-prices.json"), "utf8")) : (await loadJsonSource(options.prices)).value;
     const selected = options.runtime === "auto" ? ["claude", "codex"] : [options.runtime];
-    const estimates = await Promise.all(selected.map(async (runtime) => estimateRuntime({ evidence: runtime === "claude" ? await loadClaudeEvidence({ cwd: process.cwd(), session: options.session }) : await loadCodexEvidence({ cwd: process.cwd(), session: options.session }), catalog, explicitBaselineModel: options.baselineModel })));
-    const report = combineEstimates({ catalog, estimates });
+    const validCatalog = validatePriceCatalog(catalog);
+    if (options.baselineModel !== null && selected.every((runtime) => resolveModelPrice(validCatalog, runtime, options.baselineModel) === null)) throw Object.assign(new TypeError("BASELINE_MODEL_UNKNOWN"), { code: "BASELINE_MODEL_UNKNOWN" });
+    const settled = await Promise.all(selected.map(async (runtime) => {
+      try {
+        const evidence = runtime === "claude" ? await loadClaudeEvidence({ cwd: process.cwd(), session: options.session }) : await loadCodexEvidence({ cwd: process.cwd(), session: options.session });
+        return { runtime, estimate: estimateRuntime({ evidence, catalog: validCatalog, explicitBaselineModel: options.baselineModel }), failed: false };
+      } catch {
+        return { runtime, estimate: unavailableRuntimeEstimate(runtime), failed: true };
+      }
+    }));
+    const failures = settled.filter((entry) => entry.failed);
+    if (failures.length === selected.length) throw Object.assign(new Error("ESTIMATE_RUNTIME_FAILURE"), { code: "ESTIMATE_RUNTIME_FAILURE" });
+    const report = combineEstimates({ catalog: validCatalog, estimates: settled.map((entry) => entry.estimate) });
     await writeSafeReport(resolve(options.output), report);
     process.stdout.write(`${renderHumanSummary(report)}\n`);
+    if (failures.length > 0) process.exitCode = 1;
     return undefined;
   }
   if (options.command === "recover") return recoverRouting({ manifest: { path: resolve(options.manifest) } });

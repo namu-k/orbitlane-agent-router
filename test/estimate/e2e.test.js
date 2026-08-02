@@ -49,6 +49,10 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     assert.equal(report.runtimes.codex.runtime, "codex");
     assert.equal(report.runtimes.codex.confidence.runtime_cap, 65);
     assert.match(report.disclaimer, /not a billing statement or proven net savings/);
+    const repeated = join(project, "report-repeat.json");
+    const repeat = await invokeEstimate(["--runtime", "auto", "--session", "latest", "--baseline-model", "sol", "--output", repeated], { cwd: project, env });
+    assert.equal(repeat.code, 0, repeat.stderr);
+    assert.equal(await readFile(output, "utf8"), await readFile(repeated, "utf8"));
   });
 }
 

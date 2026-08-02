@@ -101,7 +101,7 @@ orbitlane estimate --runtime <auto|claude|codex> --session <latest|thread-id|pat
 
 Claude의 `latest`는 프로젝트 `.orbitlane/evidence/project` 증거를 읽고, 명시 경로는 증거 파일 또는 디렉터리로 읽을 수 있습니다. Codex는 `CODEX_HOME/sessions`를 읽으며 `latest`에서 현재 프로젝트와 일치하는 user rollout 및 연결된 child rollout을 선택합니다. 번들 가격표는 `heuristic`으로 표시되며, 로컬 사용자 가격표는 `--prices`로 지정합니다.
 
-신뢰도는 High(80 이상), Medium(60–79), Low(35–59), Insufficient(35 미만)로 구분하며 Codex는 65를 넘지 않습니다. 차이가 양수면 routed-model 추정치가 선택한 baseline보다 높고, 0이면 같으며, 음수면 낮습니다. 데이터가 부족하면 `데이터 부족`과 null 금액으로 표시합니다.
+신뢰도는 High(80 이상), Medium(55–79), Low(35–54), Insufficient(35 미만)로 구분하며 Codex는 65를 넘지 않습니다. 차이가 양수면 선택한 baseline 비용이 routed-model 추정치보다 높고, 0이면 같으며, 음수면 routed-model 추정치가 더 높습니다. 데이터가 부족하면 `데이터 부족`과 null 금액으로 표시합니다.
 
 This is a heuristic estimate, not a billing statement or proven net savings.
 

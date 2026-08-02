@@ -23,3 +23,16 @@ test("Insufficient exposes no money even if an internal priced bucket exists", (
   assert.equal(result.confidence_adjusted_reference_amount_nanos, null);
   assert.equal(result.display, "데이터 부족");
 });
+
+test("an alias match in either side of a priced comparison lowers user-supplied price confidence", () => {
+  const aliasCatalog = { ...catalog, models: [
+    { runtime: "codex", model: "gpt-5.6-sol", aliases: ["sol"], ...rates("9000000000") },
+    { runtime: "codex", model: "gpt-5.6-terra", aliases: ["terra", "worker"], ...rates("1000000000") },
+  ] };
+  const result = estimateRuntime({ evidence, catalog: aliasCatalog, explicitBaselineModel: "sol" });
+  assert.equal(result.confidence.dimensions.price_baseline, 10);
+});
+
+test("invalid catalogs are rejected even when no usage can resolve a price", () => {
+  assert.throws(() => estimateRuntime({ evidence: { ...evidence, usage_by_model: [], observed_main_model: null }, catalog: { schema_version: 1 }, explicitBaselineModel: null }), /INVALID_PRICE_CATALOG/);
+});

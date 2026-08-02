@@ -101,7 +101,7 @@ orbitlane estimate --runtime <auto|claude|codex> --session <latest|thread-id|pat
 
 Claude reads project evidence from `.orbitlane/evidence/project` for `latest` and can read an explicit evidence file or directory. Codex reads `CODEX_HOME/sessions`; `latest` selects the matching user rollout for the current project and includes linked child rollouts. The bundled catalog is labelled `heuristic`; use `--prices` to supply a local custom catalog.
 
-High, Medium, Low, and Insufficient confidence use score bands of 80+, 60–79, 35–59, and below 35. Codex estimates are capped at 65. A positive difference means the routed-model estimate is above the selected baseline, zero means equal, and a negative difference means below it. Insufficient data is shown as `데이터 부족` with null money values.
+High, Medium, Low, and Insufficient confidence use score bands of 80+, 55–79, 35–54, and below 35. Codex estimates are capped at 65. A positive difference means the selected baseline costs more than the routed-model estimate, zero means equal, and a negative difference means the routed-model estimate costs more. Insufficient data is shown as `데이터 부족` with null money values.
 
 This is a heuristic estimate, not a billing statement or proven net savings.
 

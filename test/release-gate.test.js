@@ -252,6 +252,7 @@ test("release-gate dry run executes the packed CLI, scoped guard, and rollback l
   await writeFile(resolve(sessions, "child.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "sanitized-child", parent_thread_id: "sanitized-root", thread_source: "subagent" } })}\n${JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.6-terra" } })}\n${JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, total_tokens: 2 } } } })}\n`);
   await execFileAsync(process.execPath, [cli, "estimate", "--runtime", "codex", "--baseline-model", "sol", "--output", estimateOutput], { encoding: "utf8", env: { ...process.env, CODEX_HOME: codexHome } });
   assert.equal((await lstat(estimateOutput)).mode & 0o777, 0o600);
+  assert.doesNotMatch(await readFile(estimateOutput, "utf8"), /sanitized-(?:root|child|codex-home)/);
 
   const configDir = resolve(directory, "claude-config");
   const evidencePath = resolve(directory, "routing-decision.jsonl");

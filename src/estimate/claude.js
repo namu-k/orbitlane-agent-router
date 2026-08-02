@@ -8,6 +8,7 @@ const DECISION_FILE = "routing-decisions.v1.jsonl";
 const USAGE_FILE = "execution-usage.v1.jsonl";
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const nonEmpty = (value) => typeof value === "string" && value.length > 0;
+const safeModel = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 const count = (value) => Number.isSafeInteger(value) && value >= 0;
 
 function freeze(value) {
@@ -57,7 +58,7 @@ function selectedCollector(events) {
 }
 
 function selectedContractModel(decisions) {
-  const candidate = decisions.find((event) => event?.routing?.routed_model_class === "sol" && nonEmpty(event?.routing?.routed_model));
+  const candidate = decisions.find((event) => event?.routing?.routed_model_class === "sol" && safeModel(event?.routing?.routed_model));
   return candidate?.routing?.routed_model ?? null;
 }
 
@@ -74,7 +75,8 @@ function normalized({ decisions, usages, corruptLines, totalLines, contractMainM
 
   const buckets = new Map();
   let unknown = { input_tokens: 0n, cached_input_tokens: 0n, output_tokens: 0n, total_tokens: 0n };
-  let exact = false;
+  let exactUsageCount = 0;
+  let modelBearingUsageCount = 0;
   let modelBearingUsage = false;
   let serverToolRequests = 0;
   for (const event of chosenUsages) {
@@ -83,9 +85,8 @@ function normalized({ decisions, usages, corruptLines, totalLines, contractMainM
     serverToolRequests += usage.server_tool_requests;
     const decision = event?.links?.quality === "exact" && nonEmpty(event?.links?.invocation_ref)
       ? decisionsByInvocation.get(event.links.invocation_ref) : undefined;
-    if (decision !== undefined) exact = true;
-    const resolved = nonEmpty(event?.usage?.resolved_model) ? event.usage.resolved_model : null;
-    const inferred = resolved === null && nonEmpty(decision?.routing?.injected_model) ? decision.routing.injected_model : null;
+    const resolved = safeModel(event?.usage?.resolved_model) ? event.usage.resolved_model : null;
+    const inferred = resolved === null && safeModel(decision?.routing?.injected_model) ? decision.routing.injected_model : null;
     const model = resolved ?? inferred;
     if (model === null) {
       unknown = {
@@ -97,6 +98,8 @@ function normalized({ decisions, usages, corruptLines, totalLines, contractMainM
       continue;
     }
     modelBearingUsage = true;
+    modelBearingUsageCount += 1;
+    if (decision !== undefined) exactUsageCount += 1;
     const current = buckets.get(model) ?? { model, model_source: resolved === null ? "inferred" : "resolved", input_tokens: 0n, cached_input_tokens: 0n, output_tokens: 0n, total_tokens: 0n };
     if (resolved !== null) current.model_source = "resolved";
     current.input_tokens += usage.input_tokens;
@@ -129,7 +132,7 @@ function normalized({ decisions, usages, corruptLines, totalLines, contractMainM
     source_kind: usagePresent ? "claude-events" : chosenDecisions.length > 0 ? "routing-only" : "none",
     usage_evidence: usagePresent ? "detailed" : "none",
     model_evidence: modelEvidence,
-    attribution_evidence: exact ? "exact-invocation" : modelBearingUsage ? "linked-child" : chosenDecisions.length > 0 ? "guidance-only" : "none",
+    attribution_evidence: modelBearingUsageCount > 0 && exactUsageCount === modelBearingUsageCount ? "exact-invocation" : modelBearingUsage ? "linked-child" : chosenDecisions.length > 0 ? "guidance-only" : "none",
     usage_by_model: usageByModel,
     unknown_model_usage: {
       input_tokens: unknown.input_tokens.toString(),
@@ -164,7 +167,7 @@ async function contractMainModel(cwd) {
   try {
     const resolved = await resolveEffectiveContract({ cwd, claudeConfigDir: join(cwd, ".claude") });
     const model = resolved.contract?.targets?.claude?.lanes?.sol?.model;
-    return nonEmpty(model) ? model : null;
+    return safeModel(model) ? model : null;
   } catch {
     return null;
   }

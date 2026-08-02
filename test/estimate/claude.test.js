@@ -72,3 +72,16 @@ test("normalization handles missing files and model-bearing usage without a join
   assert.equal(evidence.attribution_evidence, "linked-child");
   assert.equal(evidence.usage_by_model[0].usage.input_tokens, "1");
 });
+
+test("mixed joined and unjoined usage cannot claim exact-invocation attribution", () => {
+  const base = { observed_at: "2026-08-02T00:00:00Z", scope: { collector_instance_ref: "fixture-collector" } };
+  const usage = (event_id, invocation_ref) => ({ ...base, event_id, event_kind: "execution.usage", links: { quality: invocation_ref ? "exact" : "none", invocation_ref }, usage: { resolved_model: "claude-sonnet-5", total_tokens: 1, billing_units: { input_tokens: 1, cache_read_input_tokens: 0, cache_write_5m_input_tokens: 0, cache_write_1h_input_tokens: 0, output_tokens: 0, web_search_requests: 0, web_fetch_requests: 0 } } });
+  const evidence = normalizeClaudeEvents({ decisions: [{ ...base, event_id: "decision", event_kind: "routing.decision", links: { quality: "exact", invocation_ref: "joined" }, routing: { injected_model: "claude-sonnet-5" } }], usages: [usage("joined-usage", "joined"), usage("unjoined-usage", null)], corruptLines: 0, totalLines: 3 });
+  assert.equal(evidence.attribution_evidence, "linked-child");
+});
+
+test("unsafe model strings are retained only as unknown usage", () => {
+  const evidence = normalizeClaudeEvents({ decisions: [], usages: [{ event_kind: "execution.usage", observed_at: "2026-08-02T00:00:00Z", scope: { collector_instance_ref: "fixture-collector" }, usage: { resolved_model: ["", "home", "fixture-user"].join("/"), total_tokens: 1, billing_units: { input_tokens: 1, cache_read_input_tokens: 0, cache_write_5m_input_tokens: 0, cache_write_1h_input_tokens: 0, output_tokens: 0, web_search_requests: 0, web_fetch_requests: 0 } } }], corruptLines: 0, totalLines: 1 });
+  assert.deepEqual(evidence.usage_by_model, []);
+  assert.equal(evidence.unknown_model_usage.total_tokens, "1");
+});
