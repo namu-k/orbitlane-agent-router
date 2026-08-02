@@ -2,7 +2,7 @@ import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir as osHomedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import { reduceModelEvidence } from "./evidence.js";
+import { reduceModelEvidence } from "./provenance.js";
 
 const KEYS = ["input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"];
 const decimal = (value) => typeof value === "string" && /^(?:0|[1-9]\d*)$/.test(value);

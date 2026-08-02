@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { reduceModelEvidence } from "../../src/estimate/evidence.js";
+import { reduceModelEvidence } from "../../src/estimate/provenance.js";
 
 test("mixed observed and inferred model buckets retain the weaker evidence", () => {
   assert.equal(reduceModelEvidence([

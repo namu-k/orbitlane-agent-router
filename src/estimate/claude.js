@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 
 import { resolveEffectiveContract } from "../guards/resolve-contract.js";
 import { readJsonl } from "../telemetry/storage.js";
-import { reduceModelEvidence } from "./evidence.js";
+import { reduceModelEvidence } from "./provenance.js";
 
 const DECISION_FILE = "routing-decisions.v1.jsonl";
 const USAGE_FILE = "execution-usage.v1.jsonl";
