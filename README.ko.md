@@ -96,7 +96,7 @@ npx orbitlane install --target both --contract <path>
 네트워크 호출 없이 baseline 대비 비용을 로컬에서 추정합니다.
 
 ```bash
-orbitlane estimate --runtime <auto|claude|codex> --session <latest|thread-id|path> --baseline-model <model> --prices <catalog.json> --output <report.json>
+orbitlane estimate --runtime <auto|claude|codex> [--session <latest|thread-id|path>] [--baseline-model <model>] [--prices <catalog.json>] --output <report.json>
 ```
 
 Claude의 `latest`는 프로젝트 `.orbitlane/evidence/project` 증거를 읽고, 명시 경로는 증거 파일 또는 디렉터리로 읽을 수 있습니다. Codex는 `CODEX_HOME/sessions`를 읽으며 `latest`에서 현재 프로젝트와 일치하는 user rollout 및 연결된 child rollout을 선택합니다. 번들 가격표는 `heuristic`으로 표시되며, 로컬 사용자 가격표는 `--prices`로 지정합니다.

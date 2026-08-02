@@ -49,6 +49,21 @@ test("allocation distributes rounded units without manufacturing negative unknow
   assert.equal(BigInt(result.usage_by_model.reduce((sum, entry) => sum + BigInt(entry.usage.total_tokens), 0n)) + BigInt(result.unknown_model_usage.total_tokens), 1n);
 });
 
+test("duplicate child IDs and corrupt or partial records do not inflate usage or confidence evidence", () => {
+  const child = { id: "child", parent_thread_id: "root", models: ["gpt-5.6-terra"], usage, corrupt: 1, total_lines: 3, timestamp: 1 };
+  const evidence = normalizeCodexRollouts({ root: { id: "root", models: ["gpt-5.6-sol"], corrupt: 1, total_lines: 2 }, children: [child, { ...child, usage: { ...usage, total_tokens: "300" }, timestamp: 0 }], spawnObservations: [] });
+  assert.equal(evidence.usage_by_model.length, 1);
+  assert.equal(evidence.usage_by_model[0].usage.total_tokens, "150");
+  assert.equal(evidence.corrupt_lines, 2);
+  assert.equal(evidence.total_lines, 5);
+});
+
+test("fallback resolves a model-less agent_type through the Codex role contract as inferred", () => {
+  const evidence = normalizeCodexRollouts({ root: { id: "root", usage, models: [] }, children: [], spawnObservations: [{ model: null, agent_type: "executor" }], contract: { roles: { executor: { lane: "terra" } }, targets: { codex: { lanes: { terra: { model: "gpt-5.6-terra" } } } } } });
+  assert.equal(evidence.usage_by_model[0].model, "gpt-5.6-terra");
+  assert.equal(evidence.usage_by_model[0].model_source, "inferred");
+});
+
 test("latest selects the newest canonical-cwd root and explicit IDs reject ambiguity", async (t) => {
   const project = await mkdtemp(join(tmpdir(), "orbitlane-estimate-codex-"));
   const sessions = join(project, "codex-home", "sessions");

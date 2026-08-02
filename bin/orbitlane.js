@@ -341,7 +341,8 @@ async function main() {
       try {
         const evidence = runtime === "claude" ? await loadClaudeEvidence({ cwd: process.cwd(), session: options.session }) : await loadCodexEvidence({ cwd: process.cwd(), session: options.session });
         return { runtime, estimate: estimateRuntime({ evidence, catalog: validCatalog, explicitBaselineModel: options.baselineModel }), failed: false };
-      } catch {
+      } catch (error) {
+        if (!new Set(["EACCES", "EPERM", "EIO", "ENOTDIR"]).has(error?.code)) throw error;
         return { runtime, estimate: unavailableRuntimeEstimate(runtime), failed: true };
       }
     }));

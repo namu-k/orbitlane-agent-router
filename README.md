@@ -96,7 +96,7 @@ No global package installation or WSL-specific setup is required.
 Create a local, baseline-relative cost estimate without a network call:
 
 ```bash
-orbitlane estimate --runtime <auto|claude|codex> --session <latest|thread-id|path> --baseline-model <model> --prices <catalog.json> --output <report.json>
+orbitlane estimate --runtime <auto|claude|codex> [--session <latest|thread-id|path>] [--baseline-model <model>] [--prices <catalog.json>] --output <report.json>
 ```
 
 Claude reads project evidence from `.orbitlane/evidence/project` for `latest` and can read an explicit evidence file or directory. Codex reads `CODEX_HOME/sessions`; `latest` selects the matching user rollout for the current project and includes linked child rollouts. The bundled catalog is labelled `heuristic`; use `--prices` to supply a local custom catalog.
