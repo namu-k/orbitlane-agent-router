@@ -51,7 +51,7 @@ function runPackageCommand(command, args, options = {}) {
 
 function publicSafetyIssues(path, text) {
   const privateProject = ["orbitlane", "agent", "router", "t2"].join("-");
-  const forbidden = [new RegExp(privatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), /\/home\/[^/\s]+/, /[A-Za-z]:\\Users\\/i, /(?:api[_-]?key|secret|token)\s*[:=]\s*["'][^"']{8,}/i, /wsl\.exe|\\\\wsl\$/i, new RegExp(privateProject, "i")];
+  const forbidden = [new RegExp(privatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), /\/home\/[^/\s]+/, /[A-Za-z]:\\Users\\/i, /(?:api[_-]?(?:key|token)|access[_-]?token|secret)\s*[:=]\s*["'][^"']{8,}/i, /wsl\.exe|\\\\wsl\$/i, new RegExp(privateProject, "i")];
   return [
     ...(forbidden.some((pattern) => pattern.test(text)) ? ["private-or-credential-material"] : []),
     ...(/(?:^|\/)(?:evidence|backups?|\.orbitlane-)/i.test(path) ? ["local-artifact-path"] : []),
@@ -112,6 +112,12 @@ test("public-safety scanner rejects representative private, artifact, and premat
   assert.notDeepEqual(publicSafetyIssues("README.md", ["/", "home", "sample-user"].join("/") + ` ${["api", "key"].join("_")}='${["1234", "5678"].join("")}'`), []);
   assert.notDeepEqual(publicSafetyIssues("README.md", ["npx", "orbitlane", "is", "available"].join(" ")), []);
   assert.notDeepEqual(publicSafetyIssues("README.md", ["orbitlane", "agent", "router", "t2"].join("-")), []);
+});
+
+test("public-safety scanner allows model tokens but still rejects credentials", () => {
+  assert.deepEqual(publicSafetyIssues("fixture.js", 'model_token: "claude-sonnet-5"'), []);
+  assert.notDeepEqual(publicSafetyIssues("fixture.js", `${["api", "token"].join("_")}: "12345678"`), []);
+  assert.notDeepEqual(publicSafetyIssues("fixture.js", `${["api", "key"].join("_")}: "12345678"`), []);
 });
 
 test("README status is release-ready with npm publication pending and bounded to Tier 1 plus scoped guard", async () => {
