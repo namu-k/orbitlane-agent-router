@@ -71,12 +71,21 @@ async function privateDirectory(path, trustedBase) {
   if (FILE_MODE_ENFORCED) await chmod(path, DIRECTORY_MODE);
 }
 
+async function assertSafeFileTarget(path) {
+  const info = await lstat(path).catch((error) => error.code === "ENOENT" ? null : Promise.reject(error));
+  if (info && (!info.isFile() || info.isSymbolicLink())) throw new Error("UNSAFE_TELEMETRY_PATH");
+  if (info) assertCurrentOwner(info);
+}
+
 export async function appendJsonl(path, event, { trustedBase } = {}) {
   try {
     if (typeof path !== "string" || path.length === 0) throw new TypeError("INVALID_TELEMETRY_PATH");
     const line = `${JSON.stringify(event)}\n`;
     if (Buffer.byteLength(line, "utf8") >= 4096) throw new RangeError("OVERSIZED_TELEMETRY_EVENT");
     await privateDirectory(dirname(path), trustedBase);
+    // Windows does not implement O_NOFOLLOW, so retain the explicit link check there;
+    // the opened-handle stat below verifies the object actually opened on every host.
+    await assertSafeFileTarget(path);
     const handle = await open(path, constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | constants.O_NOFOLLOW, FILE_MODE);
     try {
       const info = await handle.stat();
