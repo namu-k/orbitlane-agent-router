@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { observeClaudeUsage } from "../../src/guards/claude-usage-hook.js";
+import { FILE_MODE_LIMITATIONS } from "../../src/telemetry/storage.js";
 
 const fixture = (name) => readFile(new URL(`../../fixtures/hook-payloads/${name}`, import.meta.url), "utf8").then(JSON.parse);
 
@@ -42,7 +43,9 @@ test("Post observer records route-applied foreground usage without contract read
     },
     completion_mode: "foreground", iteration_count: 1,
   });
-  assert.deepEqual(entries[0].provenance, { source: "runtime-hook", limitations: ["link-identifiers-unavailable"] });
+  // The event declares where its own evidence file carries no owner-only guarantee, so the
+  // expected limitations follow the platform the same way the writer does.
+  assert.deepEqual(entries[0].provenance, { source: "runtime-hook", limitations: ["link-identifiers-unavailable", ...FILE_MODE_LIMITATIONS] });
   assert.equal("policy_projection_sha256" in entries[0].provenance, false);
 });
 

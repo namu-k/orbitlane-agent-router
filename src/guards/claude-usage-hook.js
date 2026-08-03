@@ -114,7 +114,9 @@ async function main() {
 // exits 0, which on disk is indistinguishable from a turn that spawned no agent.
 const invokedDirectly = async () => {
   if (process.argv[1] === undefined) return false;
-  try { return await realpath(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; }
+  // Both sides get canonicalized: Windows hands back an 8.3 short name in argv while the
+  // module URL carries the long form, so resolving only one of them fails just as surely.
+  try { return await realpath(process.argv[1]) === await realpath(fileURLToPath(import.meta.url)); } catch { return false; }
 };
 
 if (await invokedDirectly()) await main();

@@ -211,6 +211,12 @@ export async function loadCodexEvidence({ cwd = process.cwd(), session = "latest
   const home = typeof homedir === "function" ? homedir() : homedir;
   const root = typeof env.CODEX_HOME === "string" && env.CODEX_HOME.trim() && isAbsolute(env.CODEX_HOME) ? resolve(env.CODEX_HOME) : join(home, ".codex");
   if (typeof session !== "string" || session.length === 0) throw new TypeError("INVALID_CODEX_SESSION");
+  // A CODEX_HOME pointing at a file is a misconfiguration, not an empty session store, and
+  // it has to be told apart from one on every platform. Reading through it raises ENOTDIR
+  // on POSIX but ENOENT on Windows, where the caller would read the silence as "no
+  // sessions yet" and report Insufficient instead of naming the broken setting.
+  const rootInfo = await lstat(root).catch((error) => error.code === "ENOENT" ? null : Promise.reject(error));
+  if (rootInfo !== null && !rootInfo.isDirectory()) throw Object.assign(new Error("CODEX_HOME_NOT_A_DIRECTORY"), { code: "ENOTDIR" });
   const candidatePath = session === "latest" ? null : resolve(cwd, session);
   const candidateInfo = candidatePath === null ? null : await lstat(candidatePath).catch((error) => error.code === "ENOENT" ? null : Promise.reject(error));
   let files = await rolloutFiles(join(root, "sessions"));
