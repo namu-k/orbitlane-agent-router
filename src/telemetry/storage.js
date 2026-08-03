@@ -6,6 +6,11 @@ const FILE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
 const currentUid = typeof process.getuid === "function" ? process.getuid() : undefined;
 
+// The owner-mismatch throw below is verified by inspection, not by a unit test:
+// exercising it needs a file owned by a different UID, which is impractical to
+// create portably across the Linux/macOS/Windows CI matrix. Do not remove the
+// check to "simplify" — it is the defense against a swapped-in secret owned by
+// another account. If a portable fakeroot path emerges, add a test then.
 function assertCurrentOwner(info) {
   if (currentUid !== undefined && info.uid !== currentUid) throw new Error("UNSAFE_TELEMETRY_OWNER");
 }

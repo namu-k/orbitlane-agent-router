@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   priceUsageDifference,
@@ -8,6 +11,8 @@ import {
   roundHalfUp,
   validatePriceCatalog,
 } from "../../src/estimate/pricing.js";
+
+const bundledCatalogPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "estimate", "default-prices.json");
 
 const rates = (input, cachedInput, output) => ({
   input: { rate_nanos_per_million_tokens: input },
@@ -100,4 +105,35 @@ test("catalog validation rejects invalid decimals, duplicate aliases, and mixed 
     usage: { input_tokens: "-1", cached_input_tokens: "0", output_tokens: "0", total_tokens: "0" },
     routedPrice: rates("1", "1", "1"), baselinePrice: rates("1", "1", "1"),
   }), /INVALID_PRICE_USAGE/);
+});
+
+test("the bundled heuristic catalog pins the six approved rate triplets", async () => {
+  const raw = JSON.parse(await readFile(bundledCatalogPath, "utf8"));
+  assert.deepEqual(
+    { schema_version: raw.schema_version, effective_from: raw.effective_from, source_label: raw.source_label, basis: raw.basis, currency: raw.currency },
+    { schema_version: 1, effective_from: "2026-08-02", source_label: "orbitlane-heuristic-reference-2026-08-02", basis: "heuristic", currency: "USD" }
+  );
+  const catalog = validatePriceCatalog(raw);
+  // [runtime, model, aliases, input, cached_input, output] — must match docs/superpowers/specs plan table exactly.
+  const expected = [
+    ["codex", "gpt-5.6-sol", ["sol"], "10000000000", "1000000000", "40000000000"],
+    ["codex", "gpt-5.6-terra", ["terra"], "2000000000", "200000000", "8000000000"],
+    ["codex", "gpt-5.6-luna", ["luna"], "500000000", "50000000", "2000000000"],
+    ["claude", "claude-opus-5", ["opus", "claude-opus-4-8", "claude-opus-4-8[1m]"], "15000000000", "1500000000", "75000000000"],
+    ["claude", "claude-sonnet-5", ["sonnet"], "3000000000", "300000000", "15000000000"],
+    ["claude", "claude-haiku-4-5-20251001", ["haiku"], "1000000000", "100000000", "5000000000"],
+  ];
+  assert.equal(catalog.models.length, expected.length, "bundled catalog model count drifted");
+  catalog.models.forEach((entry, index) => {
+    const [runtime, model, aliases, inputRate, cachedRate, outputRate] = expected[index];
+    assert.equal(entry.runtime, runtime);
+    assert.equal(entry.model, model);
+    assert.deepEqual(entry.aliases, aliases);
+    assert.deepEqual({ input: entry.input, cached_input: entry.cached_input, output: entry.output }, rates(inputRate, cachedRate, outputRate));
+    const crossRuntime = runtime === "codex" ? "claude" : "codex";
+    for (const token of [model, ...aliases]) {
+      assert.equal(resolveModelPrice(catalog, runtime, token).model, model, `${token} did not resolve within ${runtime}`);
+      assert.equal(resolveModelPrice(catalog, crossRuntime, token), null, `${token} leaked across runtimes into ${crossRuntime}`);
+    }
+  });
 });
