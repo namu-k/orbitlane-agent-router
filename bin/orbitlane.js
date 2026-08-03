@@ -1,25 +1,36 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from "node:crypto";
-import { cp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, realpath, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createClaudeTier1Adapter } from "../src/adapters/claude/index.js";
 import { createCodexTier1Adapter } from "../src/adapters/codex/index.js";
 import { resolveTargetPaths } from "../src/config/paths.js";
-import { planSnapshot, writeSnapshot } from "../src/config/snapshots.js";
+import { planSnapshot } from "../src/config/snapshots.js";
 import { loadJsonSource } from "../src/config/source.js";
 import { resolveEffectiveContract } from "../src/guards/resolve-contract.js";
 import { installRouting, previewRouting, recoverRouting, uninstallRouting } from "../src/installer/index.js";
+import { loadClaudeEvidence } from "../src/estimate/claude.js";
+import { loadCodexEvidence } from "../src/estimate/codex.js";
+import { resolveModelPrice, validatePriceCatalog } from "../src/estimate/pricing.js";
+import { scoreConfidence } from "../src/estimate/confidence.js";
+import { estimateRuntime } from "../src/estimate/index.js";
+import { combineEstimates, renderHumanSummary, writeSafeReport } from "../src/estimate/report.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = new Set(["codex", "claude", "both"]);
 
+function unavailableRuntimeEstimate(runtime) {
+  const confidence = scoreConfidence({ runtime, source_kind: "none", usage_evidence: "none", model_evidence: "unknown", attribution_evidence: "none", price_basis: "none", price_match: null, baseline_source: "unknown", baseline_known: false, priced_included_usage: "0", total_observed_usage: "0", corrupt_lines: 0, total_lines: 0 });
+  return Object.freeze({ runtime, status: "insufficient", raw_estimated_model_cost_difference_nanos: null, confidence_adjusted_reference_amount_nanos: null, display: "데이터 부족", confidence, baseline: Object.freeze({ status: "unknown", model: null, source: "unknown" }), coverage: confidence.coverage, models: Object.freeze([]), calculation_basis: Object.freeze({ price_basis: null, price_match: null }), warnings: Object.freeze(["RUNTIME_EVIDENCE_UNAVAILABLE"]) });
+}
+
 // The installed hook must keep working after the package that installed it is gone,
 // which is the normal end state for npx and dlx. Rather than storing an absolute path
 // into an evictable cache, install copies the runtime next to the report it reads.
-function vendoredHookPath(root) {
-  const path = join(root, ".orbitlane", "hook", "guards", "claude-spawn-hook.js");
+function vendoredHookPath(root, filename = "claude-spawn-hook.js") {
+  const path = join(root, ".orbitlane", "hook", "guards", filename);
   // node has to receive this as a real path, so unlike the other guard arguments it
   // cannot be base64. POSIX single quoting makes any byte literal, but cmd expands
   // %VAR% even inside double quotes, so such a path could never launch correctly.
@@ -29,39 +40,29 @@ function vendoredHookPath(root) {
   return path;
 }
 
-async function vendorHookRuntime(root) {
-  const destination = join(root, ".orbitlane", "hook");
-  const staged = join(root, ".orbitlane", `.hook-${randomUUID()}`);
-  const retired = join(root, ".orbitlane", `.hook-retired-${randomUUID()}`);
-  try {
-    await cp(join(PACKAGE_ROOT, "src"), staged, { recursive: true });
-    // The copy leaves the package's module scope behind. Without this the nearest
-    // ancestor package.json decides the module type, and in a project that declares
-    // CommonJS every import in the hook would fail.
-    await writeFile(join(staged, "package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`, "utf8");
-    // Swap by two renames rather than deleting the live runtime first. The already
-    // installed settings point at this path, so a guard launched during a recursive
-    // delete would find no hook at all; between two renames the gap is a single
-    // directory operation, and an interruption leaves the retired copy recoverable.
-    const replaced = await rename(destination, retired).then(() => true, (error) => {
-      if (error?.code === "ENOENT") return false;
-      throw error;
-    });
-    await rename(staged, destination);
-    if (replaced) await rm(retired, { recursive: true, force: true }).catch(() => {});
-  } catch (error) {
-    await rm(staged, { recursive: true, force: true }).catch(() => {});
-    throw error;
-  }
+function usage() {
+  return "Usage: orbitlane <install|uninstall|recover> --target <codex|claude|both> --contract <path> [--global] [--config-root <path>] [--runtime-defaults <path>] [--dry-run]\n       orbitlane estimate --runtime <auto|claude|codex> [--session <latest|thread-id|path>] [--baseline-model <model>] [--prices <catalog.json>] --output <report.json>";
 }
 
-function usage() {
-  return "Usage: orbitlane <install|uninstall|recover> --target <codex|claude|both> --contract <path> [--global] [--config-root <path>] [--runtime-defaults <path>] [--dry-run]";
+function parseEstimate(rest) {
+  const options = {};
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index];
+    if (!['--runtime', '--session', '--baseline-model', '--prices', '--output'].includes(token)) throw Object.assign(new TypeError(`UNKNOWN_OPTION: ${token}`), { code: 'UNKNOWN_OPTION' });
+    const value = rest[++index]; if (typeof value !== 'string' || value.startsWith('--') || options[token] !== undefined) throw Object.assign(new TypeError(`INVALID_ESTIMATE_OPTION: ${token}`), { code: 'INVALID_ESTIMATE_OPTION' });
+    options[token] = value;
+  }
+  if (!['auto', 'claude', 'codex'].includes(options['--runtime'])) throw Object.assign(new TypeError('RUNTIME_REQUIRED: auto, claude, or codex'), { code: 'RUNTIME_REQUIRED' });
+  if (options['--output'] === undefined) throw Object.assign(new TypeError('OUTPUT_REQUIRED'), { code: 'OUTPUT_REQUIRED' });
+  const session = options['--session'] ?? 'latest';
+  if (options['--runtime'] === 'auto' && session !== 'latest') throw Object.assign(new TypeError('AUTO_SESSION_MUST_BE_LATEST'), { code: 'AUTO_SESSION_MUST_BE_LATEST' });
+  return Object.freeze({ command: 'estimate', runtime: options['--runtime'], session, output: options['--output'], baselineModel: options['--baseline-model'] ?? null, prices: options['--prices'] });
 }
 
 function parse(argv) {
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0])) return Object.freeze({ command: "help" });
   const [command = "install", ...rest] = argv;
+  if (command === "estimate") return parseEstimate(rest);
   const options = {};
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -101,13 +102,17 @@ function transitionFailure(code, path) {
   return Object.assign(new Error(`${code}: ${path}`), { code });
 }
 
-function hasAgentHook(settings, command) {
-  const entries = settings?.hooks?.PreToolUse;
-  if (!Array.isArray(entries)) return false;
-  return entries
-    .filter((entry) => entry?.matcher === "Agent")
-    .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-    .some((hook) => hook?.type === "command" && hook.command === command);
+function hasHookTuples(settings, tuples) {
+  return tuples.every(({ event, matcher, command }) => Array.isArray(settings?.hooks?.[event])
+    && settings.hooks[event].some((entry) => entry?.matcher === matcher
+      && Array.isArray(entry.hooks) && entry.hooks.some((hook) => hook?.type === "command" && hook.command === command)));
+}
+
+function receiptHooks(receipt) {
+  if (receipt?.version === 2 && Array.isArray(receipt.hooks) && receipt.hooks.length > 0
+    && receipt.hooks.every((hook) => ["PreToolUse", "PostToolUse"].includes(hook?.event) && hook.matcher === "Agent" && typeof hook.command === "string" && hook.command.length > 0)) return receipt.hooks;
+  if (receipt?.version === 1 && receipt.install_shape === "claude-managed-role-guard" && typeof receipt.guard_command === "string") return [{ event: "PreToolUse", matcher: "Agent", command: receipt.guard_command }];
+  return undefined;
 }
 
 async function claudeTransitionAction(options, claudeGuardEnabled) {
@@ -124,7 +129,7 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
   const receipt = report.receipt;
   const legacy = receipt?.version === undefined;
   if (!legacy) {
-    if (receipt?.version !== 1 || !["guidance-only", "claude-managed-role-guard"].includes(receipt.install_shape)
+    if (!([1, 2].includes(receipt?.version)) || (receipt.version === 1 && !["guidance-only", "claude-managed-role-guard"].includes(receipt.install_shape))
       || (receipt.install_shape === "claude-managed-role-guard" && (typeof receipt.guard_command !== "string" || receipt.guard_command.length === 0))) {
       throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
     }
@@ -135,17 +140,16 @@ async function claudeTransitionAction(options, claudeGuardEnabled) {
     if (effective.reportPath !== canonicalGeneratedPath) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
   }
   if (receipt?.version === 1 && receipt.install_shape === "guidance-only") return undefined;
-  const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+  const hooks = legacy ? (typeof report?.settings_projection?.guard_command === "string" ? [{ event: "PreToolUse", matcher: "Agent", command: report.settings_projection.guard_command }] : undefined) : receiptHooks(receipt);
   if (!legacy && (!report?.contract_snapshot || !digest.test(report.contract_snapshot.sha256 ?? ""))) throw transitionFailure("REPORT_POINTER_MISSING", resolved.generatedPath);
-  if ((legacy && (typeof command !== "string" || command.length === 0))
-    || (!legacy && (receipt?.version !== 1 || receipt.install_shape !== "claude-managed-role-guard" || typeof command !== "string" || command.length === 0))) {
+  if (!Array.isArray(hooks)) {
     throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.generatedPath);
   }
   let settings;
   try { settings = JSON.parse(await readFile(resolved.settingsPath, "utf8")); } catch { throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath); }
-  if (!hasAgentHook(settings, command)) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath);
+  if (!hasHookTuples(settings, hooks)) throw transitionFailure("RECEIPT_UNVERIFIABLE", resolved.settingsPath);
   if (claudeGuardEnabled) return undefined;
-  return Object.freeze({ kind: "remove-owned-hook", command, reportHash: sha256(content) });
+  return Object.freeze({ kind: "remove-owned-hook", hooks, reportHash: sha256(content) });
 }
 
 async function readJsonIfPossible(path) {
@@ -193,10 +197,10 @@ async function receiptAdapters(options) {
     // proves nothing and must not touch settings.json.
     const versionedWithoutSchema = receipt?.version !== undefined && report?.schema_version !== 2;
     const legacy = receipt?.version === undefined;
-    const command = legacy ? report?.settings_projection?.guard_command : receipt?.guard_command;
+    const hooks = legacy ? (typeof report?.settings_projection?.guard_command === "string" ? [{ event: "PreToolUse", matcher: "Agent", command: report.settings_projection.guard_command }] : undefined) : receiptHooks(receipt);
     const shape = legacy
-      ? (typeof command === "string" && command.length > 0 ? "claude-managed-role-guard" : undefined)
-      : receipt?.version === 1 ? receipt.install_shape : undefined;
+      ? (Array.isArray(hooks) ? "claude-managed-role-guard" : undefined)
+      : Array.isArray(hooks) ? "claude-managed-role-guard" : receipt?.version === 1 ? receipt.install_shape : undefined;
 
     if (!versionedWithoutSchema && report !== undefined && shape === "guidance-only") {
       const staleCommand = report?.settings_projection?.guard_command;
@@ -217,9 +221,9 @@ async function receiptAdapters(options) {
       // matcher would report a successful uninstall while leaving the entry in place
       // and deleting the runtime it points at.
       const settings = await readJsonIfPossible(resolved.claude.settingsPath);
-      const installed = hasAgentHook(settings, command);
-      result.claude = !versionedWithoutSchema && shape === "claude-managed-role-guard" && typeof command === "string" && command.length > 0 && installed
-        ? Object.freeze({ ...resolved.claude, spawnGuardCommand: command })
+      const installed = Array.isArray(hooks) && hasHookTuples(settings, hooks);
+      result.claude = !versionedWithoutSchema && shape === "claude-managed-role-guard" && installed
+        ? Object.freeze({ ...resolved.claude, spawnGuardCommand: hooks })
         : failedAdapter(Object.assign(new Error(`RECEIPT_UNVERIFIABLE: ${resolved.claude.generatedPath}`), { code: "RECEIPT_UNVERIFIABLE" }), resolved.claude);
     }
   }
@@ -246,8 +250,17 @@ function adapters(contract, options) {
       if (options.claudePreparationError !== undefined) throw options.claudePreparationError;
       result.claude = Object.freeze({ ...createClaudeTier1Adapter(contract, {
         ...claudePaths,
+        managedAssets: options.managedAssets,
         ...(options.claudeGuardEnabled === false ? {} : {
-          spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "claude-heartbeats.jsonl"), options.global === true ? "global" : "project"),
+          spawnGuardCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root), resolved.claude.root, join(generated, "evidence", options.global === true ? "global" : "project", "routing-decisions.v1.jsonl"), options.global === true ? "global" : "project", join(generated, "evidence", options.global === true ? "global" : "project"), options.collectorInstanceRef ?? "preflight"),
+          usageObserverCommand: guardCommand(process.execPath, vendoredHookPath(resolved.claude.root, "claude-usage-hook.js"), join(generated, "evidence", options.global === true ? "global" : "project", "execution-usage.v1.jsonl"), options.global === true ? "global" : "project", options.collectorInstanceRef ?? "preflight"),
+          installedScope: options.global === true ? "global" : "project",
+          telemetryRoot: resolved.claude.root,
+          collectorInstanceRef: options.collectorInstanceRef,
+          runtimeVersionSnapshot: options.runtimeVersionSnapshot,
+          secretPaths: options.secretPaths,
+          evidenceRoots: options.evidenceRoots,
+          ownedFiles: options.ownedFiles,
         }),
         runtimeDefaults,
         contractSha256: options.contractSha256,
@@ -288,6 +301,21 @@ async function reclaimDerivedState(options, report) {
   }
 }
 
+function prepareClaudeTelemetry(root, global) {
+  const keyPath = join(root, ".orbitlane", "secrets", "telemetry-hmac.key");
+  return Object.freeze({
+    collectorInstanceRef: randomUUID(),
+    runtimeVersionSnapshot: { version: null, version_source: "unknown", version_observed_at: null, version_freshness: "unknown" },
+    secretPaths: [keyPath],
+    evidenceRoots: [join(root, ".orbitlane", "evidence", global ? "global" : "project")],
+    ownedFiles: [join(root, ".orbitlane", "hook"), join(root, ".orbitlane", "claude-report.json"), keyPath],
+    managedAssets: [
+      Object.freeze({ name: "runtime", kind: "directory", path: join(root, ".orbitlane", "hook"), sourcePath: join(PACKAGE_ROOT, "src"), packageJson: true }),
+      Object.freeze({ name: "telemetry-hmac-key", kind: "file", path: keyPath, mode: 0o600 }),
+    ],
+  });
+}
+
 async function uninstall(options, targetAdapters) {
   const report = await uninstallRouting({ target: options.target, adapters: targetAdapters });
   await reclaimDerivedState(options, report);
@@ -304,6 +332,28 @@ function exitCode(report) {
 async function main() {
   const options = parse(process.argv.slice(2));
   if (options.command === "help") return null;
+  if (options.command === "estimate") {
+    const catalog = options.prices === undefined ? JSON.parse(await readFile(join(PACKAGE_ROOT, "src", "estimate", "default-prices.json"), "utf8")) : (await loadJsonSource(options.prices)).value;
+    const selected = options.runtime === "auto" ? ["claude", "codex"] : [options.runtime];
+    const validCatalog = validatePriceCatalog(catalog);
+    if (options.baselineModel !== null && selected.every((runtime) => resolveModelPrice(validCatalog, runtime, options.baselineModel) === null)) throw Object.assign(new TypeError("BASELINE_MODEL_UNKNOWN"), { code: "BASELINE_MODEL_UNKNOWN" });
+    const settled = await Promise.all(selected.map(async (runtime) => {
+      try {
+        const evidence = runtime === "claude" ? await loadClaudeEvidence({ cwd: process.cwd(), session: options.session }) : await loadCodexEvidence({ cwd: process.cwd(), session: options.session });
+        return { runtime, estimate: estimateRuntime({ evidence, catalog: validCatalog, explicitBaselineModel: options.baselineModel }), failed: false };
+      } catch (error) {
+        if (!new Set(["EACCES", "EPERM", "EIO", "ENOTDIR"]).has(error?.code)) throw error;
+        return { runtime, estimate: unavailableRuntimeEstimate(runtime), failed: true };
+      }
+    }));
+    const failures = settled.filter((entry) => entry.failed);
+    if (failures.length === selected.length) throw Object.assign(new Error("ESTIMATE_RUNTIME_FAILURE"), { code: "ESTIMATE_RUNTIME_FAILURE" });
+    const report = combineEstimates({ catalog: validCatalog, estimates: settled.map((entry) => entry.estimate) });
+    await writeSafeReport(resolve(options.output), report);
+    process.stdout.write(`${renderHumanSummary(report)}\n`);
+    if (failures.length > 0) process.exitCode = 1;
+    return undefined;
+  }
   if (options.command === "recover") return recoverRouting({ manifest: { path: resolve(options.manifest) } });
   if (options.command === "uninstall") {
     return uninstall(options, await receiptAdapters(options));
@@ -318,7 +368,6 @@ async function main() {
   const runtimeDefaults = runtimeDefaultsSource?.value;
   const claudeSelected = options.target === "claude" || options.target === "both";
   const persist = options.command === "install" && options.dryRun !== true && claudeSelected;
-  const store = persist ? writeSnapshot : (root, kind, content) => planSnapshot(root, kind, content);
 
   // Everything the Claude target needs before its adapter exists. A failure here is
   // carried into adapters() as that target's failure so a --target both run still
@@ -329,10 +378,17 @@ async function main() {
     try {
       const transitionAction = await claudeTransitionAction(options, claudeGuardEnabled);
       const claudeRoot = resolveTargetPaths({ global: options.global === true, configRoot: options.configRoot, targets: ["claude"] }).claude.root;
-      if (persist && claudeGuardEnabled) await vendorHookRuntime(claudeRoot);
-      const contractSnapshot = await store(claudeRoot, "contracts", contractSource.bytes);
-      const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : await store(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
-      prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256, ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
+      const telemetry = claudeGuardEnabled ? prepareClaudeTelemetry(claudeRoot, options.global === true) : {};
+      const contractSnapshot = planSnapshot(claudeRoot, "contracts", contractSource.bytes);
+      const runtimeDefaultsSnapshot = runtimeDefaultsSource === undefined ? undefined : planSnapshot(claudeRoot, "runtime-defaults", runtimeDefaultsSource.bytes);
+      const snapshotAssets = persist ? [
+        Object.freeze({ name: `contract-${contractSnapshot.sha256}`, kind: "file", path: contractSnapshot.path, content: contractSource.bytes, mode: 0o600 }),
+        ...(runtimeDefaultsSnapshot === undefined ? [] : [Object.freeze({ name: `runtime-defaults-${runtimeDefaultsSnapshot.sha256}`, kind: "file", path: runtimeDefaultsSnapshot.path, content: runtimeDefaultsSource.bytes, mode: 0o600 })]),
+      ] : [];
+      prepared = { contractSha256: contractSnapshot.sha256, runtimeDefaultsSha256: runtimeDefaultsSnapshot?.sha256,
+        ...(claudeGuardEnabled ? telemetry : { collectorInstanceRef: "dry-run", runtimeVersionSnapshot: { version: null, version_source: "unknown", version_observed_at: null, version_freshness: "unknown" }, secretPaths: [], evidenceRoots: [], ownedFiles: [] }),
+        managedAssets: persist ? [...snapshotAssets, ...(claudeGuardEnabled ? telemetry.managedAssets : [])] : [],
+        ...(transitionAction === undefined ? {} : { claudeTransitionAction: transitionAction }) };
     } catch (error) {
       prepared = { claudePreparationError: error };
     }
@@ -345,7 +401,8 @@ async function main() {
 
 try {
   const report = await main();
-  if (report === null) process.stdout.write(`${usage()}\n`);
+  if (report === undefined) {}
+  else if (report === null) process.stdout.write(`${usage()}\n`);
   else {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     process.exitCode = exitCode(report);

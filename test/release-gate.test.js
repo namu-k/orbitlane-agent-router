@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
@@ -39,7 +39,7 @@ function run(command, args, input) {
 
 function runPackageCommand(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, shell: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env, shell: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -51,7 +51,7 @@ function runPackageCommand(command, args, options = {}) {
 
 function publicSafetyIssues(path, text) {
   const privateProject = ["orbitlane", "agent", "router", "t2"].join("-");
-  const forbidden = [new RegExp(privatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), /\/home\/[^/\s]+/, /[A-Za-z]:\\Users\\/i, /(?:api[_-]?key|secret|token)\s*[:=]\s*["'][^"']{8,}/i, /wsl\.exe|\\\\wsl\$/i, new RegExp(privateProject, "i")];
+  const forbidden = [new RegExp(privatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), /\/home\/[^/\s]+/, /[A-Za-z]:\\Users\\/i, /(?:api[_-]?(?:key|token)|access[_-]?token|secret)\s*[:=]\s*["'][^"']{8,}/i, /wsl\.exe|\\\\wsl\$/i, new RegExp(privateProject, "i")];
   return [
     ...(forbidden.some((pattern) => pattern.test(text)) ? ["private-or-credential-material"] : []),
     ...(/(?:^|\/)(?:evidence|backups?|\.orbitlane-)/i.test(path) ? ["local-artifact-path"] : []),
@@ -91,6 +91,8 @@ test("release package is allowlisted, private-free, and ships its CLI", async ()
   assert.match(manifest.version, /^\d+\.\d+\.\d+/, "a release requires a semver version");
   assert.deepEqual(manifest.files, ["bin/", "src/", "README.md", "README.ko.md"]);
   assert.ok(paths.includes("bin/orbitlane.js"));
+  assert.ok(paths.includes("src/estimate/default-prices.json"));
+  assert.ok(paths.includes("src/estimate/index.js"));
   assert.ok(paths.includes("src/guards/claude-spawn-hook.js"));
   assert.ok(paths.every((path) => !/(^|\/)(?:evidence|backups?|\.orbitlane-)/i.test(path)));
   assert.ok(paths.every((path) => !path.includes(privatePath)));
@@ -112,6 +114,12 @@ test("public-safety scanner rejects representative private, artifact, and premat
   assert.notDeepEqual(publicSafetyIssues("README.md", ["/", "home", "sample-user"].join("/") + ` ${["api", "key"].join("_")}='${["1234", "5678"].join("")}'`), []);
   assert.notDeepEqual(publicSafetyIssues("README.md", ["npx", "orbitlane", "is", "available"].join(" ")), []);
   assert.notDeepEqual(publicSafetyIssues("README.md", ["orbitlane", "agent", "router", "t2"].join("-")), []);
+});
+
+test("public-safety scanner allows model tokens but still rejects credentials", () => {
+  assert.deepEqual(publicSafetyIssues("fixture.js", 'model_token: "claude-sonnet-5"'), []);
+  assert.notDeepEqual(publicSafetyIssues("fixture.js", `${["api", "token"].join("_")}: "12345678"`), []);
+  assert.notDeepEqual(publicSafetyIssues("fixture.js", `${["api", "key"].join("_")}: "12345678"`), []);
 });
 
 test("README status is release-ready with npm publication pending and bounded to Tier 1 plus scoped guard", async () => {
@@ -236,13 +244,24 @@ test("release-gate dry run executes the packed CLI, scoped guard, and rollback l
   assert.match((await runPackageCommand("npx", ["--no-install", "--prefix", directory, "orbitlane", "--help"])).stdout, /Usage: orbitlane/);
   assert.ok(performance.now() - cliStart < 2000, `initial CLI=${performance.now() - cliStart}ms`);
 
+  const codexHome = resolve(directory, "sanitized-codex-home");
+  const sessions = resolve(codexHome, "sessions");
+  const estimateOutput = resolve(directory, "estimate-report.json");
+  await mkdir(sessions, { recursive: true });
+  await writeFile(resolve(sessions, "root.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "sanitized-root", cwd: directory, thread_source: "user" } })}\n${JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.6-sol" } })}\n`);
+  await writeFile(resolve(sessions, "child.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "sanitized-child", parent_thread_id: "sanitized-root", thread_source: "subagent" } })}\n${JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.6-terra" } })}\n${JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, total_tokens: 2 } } } })}\n`);
+  await execFileAsync(process.execPath, [cli, "estimate", "--runtime", "codex", "--baseline-model", "sol", "--output", estimateOutput], { encoding: "utf8", env: { ...process.env, CODEX_HOME: codexHome } });
+  if (process.platform !== "win32") assert.equal((await lstat(estimateOutput)).mode & 0o777, 0o600);
+  assert.doesNotMatch(await readFile(estimateOutput, "utf8"), /sanitized-(?:root|child|codex-home)/);
+
   const configDir = resolve(directory, "claude-config");
-  const evidencePath = resolve(directory, "heartbeat.jsonl");
+  const evidencePath = resolve(directory, "routing-decision.jsonl");
   const { writeSnapshot } = await import(pathToFileURL(resolve(installedRoot, "src", "config", "snapshots.js")).href);
   const snapshot = await writeSnapshot(configDir, "contracts", `${JSON.stringify(contract)}\n`);
-  await mkdir(resolve(configDir, ".orbitlane"), { recursive: true });
-  await writeFile(resolve(configDir, ".orbitlane", "claude-report.json"), `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: snapshot.sha256 } })}\n`);
-  await run(process.execPath, [resolve(installedRoot, "src", "guards", "claude-spawn-hook.js"), configDir, evidencePath], JSON.stringify({ tool_name: "Agent", tool_use_id: "release-gate", tool_input: { subagent_type: "executor", model: "claude-terra" } }));
+  await mkdir(resolve(configDir, ".orbitlane", "secrets"), { recursive: true });
+  await writeFile(resolve(configDir, ".orbitlane", "secrets", "telemetry-hmac.key"), "release-gate-key", { mode: 0o600 });
+  await writeFile(resolve(configDir, ".orbitlane", "claude-report.json"), `${JSON.stringify({ schema_version: 2, contract_snapshot: { sha256: snapshot.sha256 }, policy_provenance: { policy_projection_sha256: "e".repeat(64), projected_guidance_bytes: 64 } })}\n`);
+  await run(process.execPath, [resolve(installedRoot, "src", "guards", "claude-spawn-hook.js"), configDir, evidencePath, "project", resolve(directory, "evidence"), "release-gate"], JSON.stringify({ session_id: "session", turn_id: "turn", tool_name: "Agent", tool_use_id: "release-gate", tool_input: { subagent_type: "executor", model: "claude-terra" } }));
   assert.match(await readFile(evidencePath, "utf8"), /CONTRACT_MATCH/);
 
   const installer = await import(pathToFileURL(resolve(installedRoot, "src", "installer", "index.js")).href);

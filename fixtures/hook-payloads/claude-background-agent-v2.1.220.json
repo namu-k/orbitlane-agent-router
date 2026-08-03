@@ -1,0 +1,11 @@
+{
+  "tool_name": "Agent",
+  "tool_use_id": "TOOL_USE_ID_BACKGROUND",
+  "tool_input": {
+    "model": null,
+    "run_in_background": true
+  },
+  "tool_response": {
+    "resolvedModel": "claude-opus-5"
+  }
+}

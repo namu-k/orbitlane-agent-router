@@ -7,19 +7,19 @@ instructions belong below this line.
 
 ### Skill routing
 
-When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+An explicit slash-skill request invokes that skill. Natural-language similarity may be suggested after direct work starts, but does not invoke a skill or interrupt execution.
 
-Key routing rules:
-- Product ideas/brainstorming → invoke /office-hours
-- Strategy/scope → invoke /plan-ceo-review
-- Architecture → invoke /plan-eng-review
-- Design system/plan review → invoke /design-consultation or /plan-design-review
-- Full review pipeline → invoke /autoplan
-- Bugs/errors → invoke /investigate
-- QA/testing site behavior → invoke /qa or /qa-only
-- Code review/diff check → invoke /review
-- Visual polish → invoke /design-review
-- Ship/deploy/PR → invoke /ship or /land-and-deploy
-- Save progress → invoke /context-save
-- Resume context → invoke /context-restore
-- Author a backlog-ready spec/issue → invoke /spec
+Explicit routing examples:
+- Product ideas/brainstorming → `/office-hours`
+- Strategy/scope → `/plan-ceo-review`
+- Architecture → `/plan-eng-review`
+- Design system/plan review → `/design-consultation` or `/plan-design-review`
+- Full review pipeline → `/autoplan`
+- Bugs/errors → `/investigate`
+- QA/testing site behavior → `/qa` or `/qa-only`
+- Code review/diff check → `/review`
+- Visual polish → `/design-review`
+- Ship/deploy/PR → `/ship` or `/land-and-deploy`
+- Save progress → `/context-save`
+- Resume context → `/context-restore`
+- Author a backlog-ready spec/issue → `/spec`

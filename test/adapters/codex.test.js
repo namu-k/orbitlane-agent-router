@@ -81,6 +81,12 @@ test("emits a Tier 1 report with separate requested receipts and unproven native
   assert.equal(generated.role_binding_enforced, false);
   assert.equal(generated.status, "guidance only");
   assert.deepEqual(generated.audit.unmanaged, ["third-party"]);
+  assert.deepEqual(generated.baseline_binding, {
+    lane: "sol",
+    configured_model: "codex-sol",
+    evidence: "contract-configured",
+    effective_model: "unproven",
+  });
   assert.deepEqual(generated.requested_routes.architect, { requested_model: "codex-sol", resolution: "target-binding", provenance: "user-local", effective_model: "unproven" });
   assert.deepEqual(generated.capabilities, codexCapabilityMatrix());
 });

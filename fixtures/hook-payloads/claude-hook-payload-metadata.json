@@ -1,0 +1,63 @@
+{
+  "runtime_version": "2.1.220",
+  "foreground_capture": {
+    "hook_event_name": "PostToolUse",
+    "completion_mode": "foreground",
+    "run_in_background": false,
+    "response_fields": [
+      "resolvedModel",
+      "totalTokens",
+      "usage"
+    ]
+  },
+  "background_capture": {
+    "hook_event_name": "PostToolUse",
+    "completion_mode": "background",
+    "run_in_background": true,
+    "response_fields": [
+      "resolvedModel"
+    ]
+  },
+  "route_applied_foreground_capture": {
+    "fixture": "claude-foreground-agent-route-applied-v2.1.220.json",
+    "runtime_version": "2.1.220",
+    "hook_event_name": "PostToolUse",
+    "completion_mode": "foreground",
+    "run_in_background": false,
+    "model_source": "isolated-guard-rewrite",
+    "caller_specified_model": false,
+    "guard_injected_model": "sonnet"
+  },
+  "post_payload_version_key": null,
+  "sanitization": {
+    "fixed_tool_use_ids": {
+      "foreground": "TOOL_USE_ID_FOREGROUND",
+      "background": "TOOL_USE_ID_BACKGROUND",
+      "route_applied_foreground": "TOOL_USE_ID_FOREGROUND_ROUTE_APPLIED"
+    },
+    "omitted_fields": [
+      "session_id",
+      "transcript_path",
+      "cwd",
+      "prompt_id",
+      "permission_mode",
+      "effort",
+      "tool_input.description",
+      "tool_input.prompt",
+      "tool_input.subagent_type",
+      "tool_response.status",
+      "tool_response.prompt",
+      "tool_response.agentId",
+      "tool_response.agentType",
+      "tool_response.content",
+      "tool_response.totalDurationMs",
+      "tool_response.isAsync",
+      "tool_response.outputFile",
+      "tool_response.canReadOutputFile",
+      "duration_ms"
+    ],
+    "absent_as_null": [
+      "tool_input.model"
+    ]
+  }
+}

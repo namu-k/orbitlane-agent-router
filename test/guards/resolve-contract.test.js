@@ -63,6 +63,28 @@ test("resolution falls back to the global report when no project report exists",
   assert.equal(resolved.scope, "global");
 });
 
+test("resolution returns selected-scope receipt policy provenance", async (t) => {
+  const directory = await base(t);
+  const globalRoot = join(directory, "home", ".claude");
+  const projectRoot = join(directory, "repo");
+  const provenance = {
+    policy_projection_sha256: "d".repeat(64),
+    projected_guidance_bytes: 321,
+  };
+  await mkdir(projectRoot, { recursive: true });
+  await installReport(globalRoot, contract, {
+    policy_provenance: {
+      policy_projection_sha256: "e".repeat(64),
+      projected_guidance_bytes: 654,
+    },
+  });
+  await installReport(projectRoot, contract, { policy_provenance: provenance });
+
+  const resolved = await resolveEffectiveContract({ cwd: projectRoot, claudeConfigDir: globalRoot });
+
+  assert.deepEqual(resolved.policyProvenance, provenance);
+});
+
 test("unknown report fields do not change the outcome", async (t) => {
   const directory = await base(t);
   const globalRoot = join(directory, "home", ".claude");

@@ -91,5 +91,5 @@ export async function resolveEffectiveContract({ cwd, claudeConfigDir, readFile 
   const runtimeDefaultsSha256 = pointerDigest(report, "runtime_defaults_snapshot", reportPath, scope);
   const runtimeDefaults = runtimeDefaultsSha256 === undefined ? undefined : await load("runtime-defaults", runtimeDefaultsSha256);
 
-  return Object.freeze({ scope, reportPath, contract, runtimeDefaults, contractSha256, resolverPolicyVersion: RESOLVER_POLICY_VERSION });
+  return Object.freeze({ scope, reportPath, contract, runtimeDefaults, contractSha256, policyProvenance: report.policy_provenance, resolverPolicyVersion: RESOLVER_POLICY_VERSION });
 }
