@@ -24,8 +24,9 @@ not against how much of the runtime the contract controls.
 
 Both resolve models through `src/config/lanes.js`, so guidance and injection can never
 name different models. Most of the saving in practice comes from the guidance kernel.
+The usage observer and estimator are evidence surfaces, not a third routing mechanism.
 
-The guard is Claude-only because v0.3.0 installs no Codex guard, not because Codex
+The guard is Claude-only because OrbitLane installs no Codex guard, not because Codex
 cannot be routed. Do not repeat the earlier claim that Codex carries no model to
 rewrite — measurement on `codex-cli 0.145.0` refuted it. Codex surfaces differ from
 each other: native delegation spawns without a model, while skill fan-out was observed
@@ -45,13 +46,14 @@ Codex, and whether to inject there is an open decision, not a settled impossibil
   pinned identifier is never rewritten to an alias, which would resolve to a different
   model at a different price.
 - Model precedence follows the runtime, not intuition: `CLAUDE_CODE_SUBAGENT_MODEL`
-  outranks the per-call `model`. Reading the call first makes the heartbeat name a
-  model the session never ran.
+  outranks the per-call `model`. Reading the call first makes the routing-decision
+  record name a model the session never ran.
 - `inherit` withholds routing entirely. It means "same as unset" from v2.1.196 but
   "force the main model and ignore the call" before that, and no version reaches the
   hook — the payload carries none, and shelling out for one would blow the latency
-  budget. Injecting would be silently dropped on an older runtime while the heartbeat
-  claimed a route. An unset variable is not `inherit` and still routes normally.
+  budget. Injecting would be silently dropped on an older runtime while the
+  telemetry record claimed a route. An unset variable is not `inherit` and still
+  routes normally.
 - `effective_model` is always `unproven`. Rewriting a request does not observe what
   ran. Never report an unproven capability as success.
 - Skill- and plugin-driven work is where routing pays off most; it is not a boundary

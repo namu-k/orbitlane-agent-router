@@ -4,9 +4,55 @@ This project is pre-1.0, so breaking changes raise the minor version.
 
 ## Unreleased
 
+## 0.4.0
+
+### Migration from 0.3.0 — required only for new Claude telemetry
+
+The package upgrade exposes the offline estimator immediately, but it does not
+rewrite an installed scope. An existing v0.3 Claude guard continues routing with
+its vendored runtime. Reinstall each roles-bearing Claude scope that should collect
+the new structured routing-decision and usage evidence; until then, Claude estimates
+will remain data-limited. Codex estimation reads local rollout records and requires
+no Codex hook or reinstall.
+
+To upgrade and reinstall a scope:
+
+    npm install -g orbitlane@0.4.0
+    orbitlane install --global --target both --contract <path>
+
+Repeat the project-level install command in each project where Claude telemetry
+should be collected. Existing local evidence and its telemetry HMAC key remain
+local and are retained on uninstall.
+
 ### Added
 
-- Offline Claude and Codex confidence estimator with a local heuristic price catalog. No Codex hook or provider-price download was added.
+- Offline Claude and Codex confidence estimator with a local heuristic price
+  catalog, confidence scoring, explicit baseline selection, and safe JSON reports.
+  No Codex hook or provider-price download was added.
+- A closed structured telemetry schema for local `routing.decision` and
+  `execution.usage` evidence, with HMAC references instead of raw identifiers.
+- A Claude `PostToolUse` observer that records only allowlisted foreground usage
+  fields needed by the estimator. It does not collect prompts, responses,
+  transcripts, credentials, or source code.
+
+### Changed
+
+- Roles-bearing Claude installs now own exact `PreToolUse` and `PostToolUse` hook
+  tuples, the vendored collector runtime, an HMAC key, and receipt-v2 metadata.
+- Structured routing-decision events replace the legacy heartbeat format. Routing
+  behavior is unchanged, and `effective_model` remains `unproven`.
+- Generated reports land last in the install transaction so their presence proves
+  that the settings and owned assets they describe were committed.
+
+### Fixed
+
+- Telemetry storage now uses a caller-owned trust anchor, allowing legitimate
+  symlinked system or config roots while still refusing symlinks below the anchor.
+- Windows explicitly reports that POSIX file mode `0600` is unenforced and relies
+  on directory ACLs instead of silently disabling telemetry.
+- Native Windows paths, short-name invocation, symlinked hook paths, and invalid
+  `CODEX_HOME` roots now fail or resolve consistently across Linux, macOS, and
+  Windows.
 
 ## 0.3.0
 

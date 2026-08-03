@@ -96,7 +96,7 @@ test("a corrupt Claude receipt fails that target and leaves settings untouched",
 test("a missing snapshot still permits uninstall when the receipt verifies", async (t) => { const { contractPath, claudeHome, env } = await isolated(t); await invoke(["install", "--global", "--target", "claude", "--contract", contractPath], { env }); await rm(join(claudeHome, ".orbitlane", "contracts"), { recursive: true, force: true }); const result = await invoke(["uninstall", "--global", "--target", "claude"], { env }); assert.equal(result.code, 0); assert.deepEqual(JSON.parse(await readFile(join(claudeHome, "settings.json"), "utf8")), {}); });
 test("one target's broken receipt does not block the other target", async (t) => { const { contractPath, claudeHome, codexHome, env } = await isolated(t); await invoke(["install", "--global", "--target", "both", "--contract", contractPath], { env }); await writeFile(join(claudeHome, ".orbitlane", "claude-report.json"), "{not json", "utf8"); await invoke(["uninstall", "--global", "--target", "both"], { env }); assert.doesNotMatch(await readFile(join(codexHome, "AGENTS.md"), "utf8"), /ORBITLANE:START codex/); assert.match(await readFile(join(claudeHome, "CLAUDE.md"), "utf8"), /ORBITLANE:START claude/); });
 
-test("a successful uninstall reclaims the snapshot store but keeps the heartbeat log", async (t) => {
+test("a successful uninstall reclaims derived state but keeps local evidence and its HMAC key", async (t) => {
   const { contractPath, claudeHome, directory, env } = await isolated(t);
   const runtimeDefaultsPath = join(directory, "runtime-defaults.json");
   await writeFile(runtimeDefaultsPath, `${JSON.stringify({ lanes: {} })}\n`);

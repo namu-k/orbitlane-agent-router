@@ -2,9 +2,9 @@
 
 [English](README.md)
 
-> **상태: v0.3.0은 출시 준비가 되었고 npm 공개를 기다리고 있습니다.** 공개 후 `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration과 audit을 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
+> **현재 릴리스: v0.4.0.** `npx orbitlane`으로 설치·실행할 수 있습니다. 초기 릴리스로, Tier 1은 configuration, audit, 로컬 측정과 scoped Claude routing guard를 제공하며 모든 runtime 경로의 enforcement를 주장하지 않습니다(Tier 2 roadmap).
 >
-> **v0.2.0에서 올라올 때 재설치는 권장 사항이며 필수는 아닙니다.** package upgrade만으로는 설치된 scope를 다시 쓰지 않고 기존 guard는 계속 올바르게 동작합니다. 새 projection instruction block이 필요할 때 각 scope를 재설치하세요. roles를 선언한 0.2 contract가 실제로 사용한 lane만 담고 있다면 재설치 전에 세 lane 모두에 binding을 추가하거나 공식 runtime default를 사용할 수 있어야 합니다. [CHANGELOG.md](CHANGELOG.md) 참고.
+> **v0.3.0에서 올라올 때는 새 Claude telemetry가 필요한 scope만 재설치하세요.** package upgrade로 estimator는 사용할 수 있지만 설치된 scope를 다시 쓰지는 않으며, 기존 guard의 routing은 계속 올바르게 동작합니다. Structured routing-decision 및 usage evidence를 수집할 roles-bearing Claude scope를 재설치하세요. Codex 추정은 Codex hook 없이 로컬 rollout record를 읽습니다. [CHANGELOG.md](CHANGELOG.md) 참고.
 
 OrbitLane은 하나의 라우팅 contract를 Codex/OMX와 Claude Code의 네이티브 guidance로 컴파일하고, 실제로 강제할 수 있는 범위를 감사하는 오픈소스 **라우팅 계약 컴파일러(routing contract compiler)**입니다. v1이 제공하는 것은 contract 컴파일, merge-preserving 설치, 정적 drift 감사, 그리고 roles를 선언한 contract에만 적용되는 Claude Code scoped spawn guard입니다. 실행 시점에 모든 요청을 라우팅하는 범용 model router는 Tier 2 roadmap입니다.
 
@@ -132,8 +132,9 @@ target의 tier-to-model binding을 담지만 enforcement는 아닙니다. Codex�
 설치합니다. guard가 없으며 `effective_model`은 `unproven`으로 보고합니다.
 
 **Opt-in enforcement**는 contract가 `roles`를 선언할 때만 적용됩니다. 그때만 Claude
-target이 guard runtime을 그것이 읽을 report 옆인 `<config root>/.orbitlane/hook/`으로
-복사하고 `settings.json`에 scoped hook을 추가합니다. 이 guard는 model을 지정하지 않은
+target이 guard와 observer runtime을 그것이 읽을 report 옆인 `<config root>/.orbitlane/hook/`으로
+복사하고 `settings.json`에 scoped `PreToolUse` routing hook과 `PostToolUse` usage-observer
+hook을 추가합니다. 이 guard는 model을 지정하지 않은
 spawn에 routed model을 채워 넣고, 그 밖의 경우에는 비켜섭니다. 명시적으로 지명된 model,
 구체적인 `CLAUDE_CODE_SUBAGENT_MODEL`, contract가 routing하지 않는 role은 모두 그대로
 통과하며 기록만 남습니다. Model 선택을 이유로 spawn을 차단하지는 않습니다. 차단된 spawn은
@@ -142,10 +143,12 @@ spawn에 routed model을 채워 넣고, 그 밖의 경우에는 비켜섭니다.
 `roles`가 없는 contract는 guidance만 설치합니다. `settings.json` hook도 vendored guard
 runtime도 만들지 않습니다. 설치한 package가 사라진 뒤에도 Claude guard는 계속 판정하며,
 이는 `npx`와 `dlx`의 정상적인 최종 상태입니다. `npx orbitlane install`은 모든 target과
-두 레이어 모두에서 지원합니다.
+두 레이어 모두에서 지원합니다. Observer는 정제된 foreground completion usage만 기록하며
+routing 결정에는 참여하지 않습니다.
 
-roles를 선언한 Claude 설치를 uninstall하면 그 사본과 snapshot 저장소를 함께
-회수합니다. heartbeat 로그는 증거이므로 남깁니다.
+roles를 선언한 Claude 설치를 uninstall하면 소유한 hook tuple, vendored runtime,
+snapshot을 회수합니다. Telemetry HMAC key와 로컬 routing-decision 및 usage evidence는
+남깁니다.
 
 ## 코딩 에이전트 모델 라우팅의 작동 방식
 
@@ -291,13 +294,13 @@ Claude Code adapter는 다음을 projection합니다.
 
 - `CLAUDE.md` 내부의 같은 네 줄 marker 기반 guidance block.
 - 생성된 report. 그 안의 subagent 모양 항목은 요청 route evidence이며 설치된 Claude custom subagent definition file이 아닙니다.
-- `roles`가 선언된 경우에만 기존 내용을 보존하는 settings와, model을 지정하지 않은 spawn을 lane model로 routing하는 scoped guard를 추가하며, 이는 실제 실행 model의 보장이 아닙니다.
+- `roles`가 선언된 경우에만 기존 내용을 보존하는 settings, model을 지정하지 않은 spawn을 lane model로 routing하는 scoped guard와 로컬 foreground usage observer를 추가하며, 어느 것도 실제 실행 model을 증명하지 않습니다.
 
-Claude Code는 custom subagent 정의의 model 선택과 해석 순서를 [Create custom subagents](https://code.claude.com/docs/en/sub-agents)에서 공식 지원합니다. OrbitLane 0.3.0은 그 파일을 설치하지 않습니다. [Hooks reference](https://code.claude.com/docs/en/hooks)는 차단 가능한 event와 관찰 또는 context 주입만 가능한 lifecycle event를 구분하며 OrbitLane의 scoped check도 그 경계를 넘지 않습니다.
+Claude Code는 custom subagent 정의의 model 선택과 해석 순서를 [Create custom subagents](https://code.claude.com/docs/en/sub-agents)에서 공식 지원합니다. OrbitLane은 그 파일을 설치하지 않습니다. [Hooks reference](https://code.claude.com/docs/en/hooks)는 차단 가능한 event와 관찰 또는 context 주입만 가능한 lifecycle event를 구분하며 OrbitLane의 scoped hook도 그 경계를 넘지 않습니다.
 
 ## Cross-platform 설계
 
-OrbitLane은 platform-neutral filesystem API를 사용하는 Node.js CLI로 계획하고 있습니다.
+OrbitLane은 platform-neutral filesystem API로 구현되고 세 가지 주요 운영체제 계열에서 테스트되는 Node.js CLI입니다.
 
 - Linux
 - macOS
@@ -352,7 +355,7 @@ OrbitLane은 오프라인 추정기를 위한 로컬 routing-decision 및 usage 
 
 ### OrbitLane은 WSL에 종속되나요?
 
-아닙니다. WSL은 지원 환경 중 하나입니다. 계획된 CLI는 native Windows, macOS, Linux에서도 작동해야 합니다.
+아닙니다. WSL은 지원 환경 중 하나입니다. CLI는 native Windows, macOS, Linux에서 테스트됩니다.
 
 ### OrbitLane이 AGENTS.md나 CLAUDE.md를 덮어쓰나요?
 
@@ -373,7 +376,7 @@ OrbitLane은 오프라인 추정기를 위한 로컬 routing-decision 및 usage 
 
 ## 프로젝트 상태
 
-OrbitLane v0.3.0은 npm 공개를 기다리는 출시 준비 상태입니다: contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code의 target-specific 네 줄 guidance, model을 지정하지 않은 spawn을 대상으로 하는 opt-in Claude Code scoped routing guard를 포함합니다. Guard는 실제 실행 model을 증명하지 않으며 `effective_model`은 계속 `unproven`입니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
+OrbitLane v0.4.0은 npm에서 사용할 수 있습니다. Contract 컴파일, 기존 내용을 보존하는 installer, Codex/OMX·Claude Code의 target-specific 네 줄 guidance, model을 지정하지 않은 spawn을 대상으로 하는 opt-in Claude Code scoped routing guard, structured local usage evidence와 offline confidence estimator를 포함합니다. Guard와 telemetry는 실제 실행 model을 증명하지 않으며 `effective_model`은 계속 `unproven`입니다. 모든 runtime 경로의 enforcement는 여전히 Tier 2 roadmap입니다.
 
 ## 검색 및 발견성 메모
 

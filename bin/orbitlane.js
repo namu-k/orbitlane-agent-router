@@ -283,8 +283,8 @@ function preflightAdapters(contract, options) {
 
 // The snapshot store and the vendored hook runtime exist only to serve the Claude
 // report. Once that report is gone nothing can reach them again, so a successful
-// Claude uninstall reclaims them. The heartbeat log is evidence, not derived state,
-// and is left alone. A cleanup failure is reported but never rewrites the uninstall
+// Claude uninstall reclaims them. Local telemetry evidence and its HMAC key are not
+// derived state and are left alone. A cleanup failure never rewrites the uninstall
 // verdict, which has already been committed by the transaction layer.
 async function reclaimDerivedState(options, report) {
   if (report?.outcomes?.claude?.status !== "uninstalled") return;

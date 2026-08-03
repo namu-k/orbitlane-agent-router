@@ -122,12 +122,10 @@ test("public-safety scanner allows model tokens but still rejects credentials", 
   assert.notDeepEqual(publicSafetyIssues("fixture.js", `${["api", "key"].join("_")}: "12345678"`), []);
 });
 
-test("README status is release-ready with npm publication pending and bounded to Tier 1 plus scoped guard", async () => {
+test("README status matches the release package and stays bounded to Tier 1 plus scoped guard", async () => {
   const [english, korean] = await Promise.all([readFile(resolve(root, "README.md"), "utf8"), readFile(resolve(root, "README.ko.md"), "utf8")]);
-  assert.match(english, /v0\.3\.0 is prepared for release; npm publication is pending\./i);
-  assert.match(korean, /v0\.3\.0은 출시 준비가 되었고 npm 공개를 기다리고 있습니다\./);
-  assert.doesNotMatch(english, /v0\.3\.0 is published to npm/i);
-  assert.doesNotMatch(korean, /v0\.3\.0이 npm에 공개되었습니다/);
+  assert.doesNotMatch(english, /npm publication is pending/i);
+  assert.doesNotMatch(korean, /npm 공개를 기다리고 있습니다/);
   for (const text of [english, korean]) {
     assert.match(text, /Tier 2 roadmap/i);
     assert.match(text, /scoped/i);
@@ -138,7 +136,8 @@ test("README status is release-ready with npm publication pending and bounded to
 
   // The advertised version drifted from package.json once already; pin it.
   const { version } = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
-  for (const text of [english, korean]) assert.match(text, new RegExp(`v${version.replace(/\./g, "\\.")}`), `README must advertise v${version}`);
+  assert.match(english, new RegExp(`Current release: v${version.replace(/\./g, "\\.")}`, "i"));
+  assert.match(korean, new RegExp(`현재 릴리스: v${version.replace(/\./g, "\\.")}`));
 
   const changelog = await readFile(resolve(root, "CHANGELOG.md"), "utf8");
   assert.match(changelog, new RegExp(`^## ${version.replace(/\./g, "\\.")}$`, "m"), `CHANGELOG must have a section for ${version}`);
@@ -175,7 +174,7 @@ test("the READMEs document the bounded roles-less Claude precedence consequence"
   assert.doesNotMatch(korean, /scope precedence의 보편적인 runtime enforcement 결과/);
 });
 
-test("the READMEs publish complete portable examples and the v0.2 migration boundary", async () => {
+test("the READMEs publish complete portable examples and the v0.3 migration boundary", async () => {
   const [english, korean, changelog] = await Promise.all([
     readFile(resolve(root, "README.md"), "utf8"),
     readFile(resolve(root, "README.ko.md"), "utf8"),
@@ -199,8 +198,10 @@ test("the READMEs publish complete portable examples and the v0.2 migration boun
   assert.match(korean, /선언된 roles는 검사하며 contract에 선언되지 않은 runtime role은 unmanaged로 통과합니다\./);
   assert.match(english, /all three lanes \(`sol`, `terra`, and `luna`\).*selected target.*bindings or the runtime's official defaults/i);
   assert.match(korean, /선택한 target.*세 lane\(`sol`, `terra`, `luna`\).*binding 또는 runtime의 공식 default/i);
-  assert.match(changelog, /Package upgrade alone does not rewrite an installed scope\./);
-  assert.match(changelog, /Conditional contract migration/);
+  assert.match(english, /Upgrading from v0\.3\.0: reinstall only for new Claude telemetry\./);
+  assert.match(korean, /v0\.3\.0에서 올라올 때는 새 Claude telemetry가 필요한 scope만 재설치하세요\./);
+  assert.match(changelog, /The package upgrade exposes the offline estimator immediately, but it does not\s+rewrite an installed scope\./);
+  assert.match(changelog, /Codex estimation reads local rollout records and requires\s+no Codex hook or reinstall\./);
 });
 
 test("spawn guard decision p95 remains below the 50ms local budget", () => {

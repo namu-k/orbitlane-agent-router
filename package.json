@@ -1,6 +1,6 @@
 {
   "name": "orbitlane",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "license": "MIT",
   "description": "Routing contract compiler for coding agents: compile one vendor-neutral role-to-model contract into native guidance for Codex/OMX and Claude Code, then audit what can actually be enforced. Not a proxy.",

@@ -2,9 +2,9 @@
 
 [한국어](README.ko.md)
 
-> **Status: v0.3.0 is prepared for release; npm publication is pending.** After publication, install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration and audit and is not a claim of universal runtime enforcement (the Tier 2 roadmap).
+> **Current release: v0.4.0.** Install and run it with `npx orbitlane`. This is an early release: Tier 1 delivers configuration, audit, local measurement, and a scoped Claude routing guard; it is not a claim of universal runtime enforcement (the Tier 2 roadmap).
 >
-> **Upgrading from v0.2.0: reinstalling is recommended, not required.** A package upgrade alone does not rewrite an installed scope, and existing guards keep working correctly. Reinstall each scope when you want the new projected instruction block. If a roles-bearing 0.2 contract has only the lane it used, add bindings (or use official runtime defaults) for all three lanes before reinstalling. See [CHANGELOG.md](CHANGELOG.md).
+> **Upgrading from v0.3.0: reinstall only for new Claude telemetry.** A package upgrade exposes the estimator but does not rewrite an installed scope, and existing guards keep routing correctly. Reinstall each roles-bearing Claude scope that should collect structured routing-decision and usage evidence. Codex estimation reads local rollout records without a Codex hook. See [CHANGELOG.md](CHANGELOG.md).
 
 OrbitLane is an open-source **routing contract compiler** that compiles one routing contract into runtime-native guidance for Codex/OMX and Claude Code, then audits what can actually be enforced. v1 delivers contract compilation, a merge-preserving installer, static drift auditing, and an opt-in Claude Code-scoped spawn guard for contracts that declare roles. A general-purpose runtime model router is the Tier 2 roadmap.
 
@@ -133,8 +133,9 @@ that target's tier-to-model binding, but it is not enforcement. Codex installs
 guidance only: it has no guard and reports `effective_model` as `unproven`.
 
 **Opt-in enforcement** requires a contract that declares `roles`. Only then does
-the Claude target copy the guard runtime next to the report it reads, under
-`<config root>/.orbitlane/hook/`, and add the scoped hook to `settings.json`.
+the Claude target copy the guard and observer runtime next to the report it reads,
+under `<config root>/.orbitlane/hook/`, and add scoped `PreToolUse` routing and
+`PostToolUse` usage-observer hooks to `settings.json`.
 The guard fills in the routed model when a spawn leaves the model unspecified, and
 otherwise steps aside: an explicitly named model, a concrete
 `CLAUDE_CODE_SUBAGENT_MODEL`, or a role the contract does not route all pass
@@ -145,10 +146,12 @@ Rewriting the request is still not a guarantee of the executing model;
 guidance only: no `settings.json` hook and no vendored guard runtime. The
 installed Claude guard keeps deciding after the package that installed it is
 gone, which is the normal end state for `npx` and `dlx`. `npx orbitlane install`
-is supported for every target and both layers.
+is supported for every target and both layers. The observer records only sanitized
+foreground completion usage and does not participate in routing decisions.
 
-For a roles-bearing Claude install, uninstalling reclaims that copy along with
-the snapshot store. The heartbeat log is evidence and is left in place.
+For a roles-bearing Claude install, uninstalling reclaims the owned hook tuples,
+vendored runtime, and snapshots. The telemetry HMAC key and local routing-decision
+and usage evidence are retained.
 
 ## How coding-agent model routing works
 
@@ -303,20 +306,21 @@ The Claude Code adapter projects:
 
 - The same four-line marker-bounded guidance block in `CLAUDE.md`.
 - A generated report. Its subagent-shaped entries are requested-route evidence, not installed Claude custom subagent definition files.
-- When `roles` is declared, merge-preserving settings and a scoped guard that routes model-unspecified spawns to the lane model; this is not a guarantee of the executing model.
+- When `roles` is declared, merge-preserving settings, a scoped guard that routes model-unspecified spawns to the lane model, and a local foreground usage observer; none of these prove the executing model.
 
-Claude Code officially supports model selection in custom subagent definitions and documents its resolution order in [Create custom subagents](https://code.claude.com/docs/en/sub-agents). OrbitLane 0.3.0 does not install those files. Its [hooks reference](https://code.claude.com/docs/en/hooks) also distinguishes blockable events from lifecycle events that can only observe or inject context; OrbitLane's scoped check stays within that boundary.
+Claude Code officially supports model selection in custom subagent definitions and documents its resolution order in [Create custom subagents](https://code.claude.com/docs/en/sub-agents). OrbitLane does not install those files. Its [hooks reference](https://code.claude.com/docs/en/hooks) also distinguishes blockable events from lifecycle events that can only observe or inject context; OrbitLane's scoped hooks stay within that boundary.
 
 ## Cross-platform design
 
-OrbitLane is planned as a Node.js CLI using platform-neutral filesystem APIs.
+OrbitLane is a Node.js CLI built with platform-neutral filesystem APIs and tested
+on all three major operating-system families.
 
 - Linux
 - macOS
 - Windows
 - WSL, as a supported Linux environment rather than a dependency
 
-The installer will discover user configuration directories through runtime conventions and explicit flags. It will not embed a developer username, home directory, shell profile, or project-specific path.
+The installer discovers user configuration directories through runtime conventions and explicit flags. It does not embed a developer username, home directory, shell profile, or project-specific path.
 
 ## Privacy and safe installation
 
@@ -364,7 +368,7 @@ No. OrbitLane configures coding-agent roles and runtime adapters. It does not ro
 
 ### Is OrbitLane tied to WSL?
 
-No. WSL is one supported environment. The planned CLI is cross-platform and must also work on native Windows, macOS, and Linux.
+No. WSL is one supported environment. The CLI is tested on native Windows, macOS, and Linux.
 
 ### Will OrbitLane overwrite AGENTS.md or CLAUDE.md?
 
@@ -385,7 +389,7 @@ No. The installer is designed to own only a clearly marked routing block and pre
 
 ## Project status
 
-OrbitLane v0.3.0 is prepared for release with npm publication pending: contract compilation, a merge-preserving installer, target-specific four-line guidance for Codex/OMX and Claude Code, and an opt-in Claude Code-scoped routing guard for model-unspecified spawns. The guard does not prove the executing model; `effective_model` remains `unproven`. Universal runtime enforcement remains the Tier 2 roadmap.
+OrbitLane v0.4.0 is available from npm with contract compilation, a merge-preserving installer, target-specific four-line guidance for Codex/OMX and Claude Code, an opt-in Claude Code-scoped routing guard for model-unspecified spawns, structured local usage evidence, and an offline confidence estimator. The guard and telemetry do not prove the executing model; `effective_model` remains `unproven`. Universal runtime enforcement remains the Tier 2 roadmap.
 
 ## Discoverability notes
 
