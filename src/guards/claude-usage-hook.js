@@ -1,5 +1,7 @@
-import { appendJsonl } from "../telemetry/storage.js";
+import { FILE_MODE_LIMITATIONS, appendJsonl } from "../telemetry/storage.js";
 import { createEvent } from "../telemetry/event.js";
+import { dirname } from "node:path";
+import { realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const BILLING_UNITS = Object.freeze([
@@ -41,7 +43,7 @@ function usageFrom(payload) {
   });
 }
 
-export async function observeClaudeUsage({ payload, installedScope, collectorInstanceRef, telemetryRoot, appendTelemetry, createTelemetryEvent = createEvent, reportDiagnostic } = {}) {
+export async function observeClaudeUsage({ payload, installedScope, collectorInstanceRef, telemetryRoot, telemetryBase, appendTelemetry, createTelemetryEvent = createEvent, reportDiagnostic } = {}) {
   const usage = usageFrom(payload);
   if (usage === null || !["project", "global"].includes(installedScope) || !nonEmptyString(collectorInstanceRef)) {
     return Object.freeze({ observed: false, telemetry_recorded: false });
@@ -64,7 +66,7 @@ export async function observeClaudeUsage({ payload, installedScope, collectorIns
       routing: null,
       model_evidence: {},
       usage,
-      provenance: { source: "runtime-hook", limitations: ["link-identifiers-unavailable"] },
+      provenance: { source: "runtime-hook", limitations: ["link-identifiers-unavailable", ...FILE_MODE_LIMITATIONS] },
     });
   } catch {
     try { reportDiagnostic?.("TELEMETRY_EVENT_CREATION_FAILED"); } catch {}
@@ -72,7 +74,9 @@ export async function observeClaudeUsage({ payload, installedScope, collectorIns
   }
 
   try {
-    const result = await (appendTelemetry ?? ((entry) => appendJsonl(telemetryRoot, entry)))(event);
+    // This hook is handed the evidence file alone, so its own directory is the deepest
+    // anchor it can name. The spawn hook knows the config root and trusts from higher up.
+    const result = await (appendTelemetry ?? ((entry) => appendJsonl(telemetryRoot, entry, { trustedBase: telemetryBase ?? dirname(telemetryRoot) })))(event);
     return Object.freeze({ observed: true, telemetry_recorded: result?.written !== false });
   } catch {
     return Object.freeze({ observed: true, telemetry_recorded: false });
@@ -103,4 +107,14 @@ async function main() {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
+// Node resolves the module URL through symlinks but leaves argv[1] exactly as the caller
+// typed it, so comparing them raw makes the hook decide it is being imported and return
+// without observing anything. macOS reaches os.tmpdir() through /var -> /private/var and
+// any symlinked config root does the same on every platform: the run stays silent and
+// exits 0, which on disk is indistinguishable from a turn that spawned no agent.
+const invokedDirectly = async () => {
+  if (process.argv[1] === undefined) return false;
+  try { return await realpath(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; }
+};
+
+if (await invokedDirectly()) await main();

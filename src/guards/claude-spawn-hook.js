@@ -1,7 +1,7 @@
 import { RESOLVER_POLICY_VERSION, resolveEffectiveContract } from "./resolve-contract.js";
 import { runClaudeSpawnGuard } from "./claude-spawn.js";
 import { readPrivateFile } from "../telemetry/storage.js";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 
 const decodeArgument = (value) => typeof value === "string" && value.startsWith("base64:")
   ? Buffer.from(value.slice("base64:".length), "base64").toString("utf8")
@@ -14,6 +14,17 @@ const [claudeConfigDir, evidencePath, installedScopeArgument, telemetryRoot, col
 // but still needs a project reinstall. Absent for hooks installed before this became
 // part of the argument contract.
 const installedScope = installedScopeArgument === "project" || installedScopeArgument === "global" ? installedScopeArgument : undefined;
+
+// Anchors the symlink walk over the evidence path. An install puts the file under the
+// config root, which lets every segment below it be checked; but the argv contract admits
+// a path anywhere, and there the file's own directory is the deepest honest anchor.
+// Refusing the spawn instead would cost a failed turn to defend a path the caller chose.
+function telemetryAnchor() {
+  if (typeof claudeConfigDir !== "string" || claudeConfigDir.length === 0) return dirname(evidencePath);
+  const rest = relative(resolvePath(claudeConfigDir), resolvePath(evidencePath));
+  const inside = rest.length > 0 && !isAbsolute(rest) && !rest.split(sep).includes("..");
+  return inside ? claudeConfigDir : dirname(evidencePath);
+}
 
 const input = await new Promise((resolve, reject) => {
   let body = "";
@@ -50,8 +61,15 @@ if (payload !== undefined) {
       resolved = undefined;
     }
     if (resolved !== undefined) {
+      // An unreadable key withholds every event downstream, so it cannot stay silent:
+      // without it decisionEvent refuses to build an event at all and the guard records
+      // nothing, which reads on disk exactly like a session that never spawned an agent.
       let telemetryKey;
-      try { telemetryKey = await readPrivateFile(join(claudeConfigDir, ".orbitlane", "secrets", "telemetry-hmac.key")); } catch {}
+      try {
+        telemetryKey = await readPrivateFile(join(claudeConfigDir, ".orbitlane", "secrets", "telemetry-hmac.key"));
+      } catch (error) {
+        if (error?.code !== "ENOENT") process.stderr.write(`TELEMETRY_KEY_UNREADABLE reason=${error?.message ?? error?.code ?? "unknown"}\n`);
+      }
       const result = await runClaudeSpawnGuard({
         input: { ...(payload.tool_input ?? payload), environment_model: process.env.CLAUDE_CODE_SUBAGENT_MODEL },
         contract: resolved.contract,
@@ -61,6 +79,7 @@ if (payload !== undefined) {
         policyProvenance: resolved.policyProvenance,
         resolverPolicyVersion: RESOLVER_POLICY_VERSION,
         telemetryRoot: evidencePath,
+        telemetryBase: telemetryAnchor(),
         collectorInstanceRef,
         telemetryKey,
         identifiers: { session: payload.session_id, turn: payload.turn_id, invocation: payload.tool_use_id },

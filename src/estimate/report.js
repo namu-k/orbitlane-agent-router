@@ -1,6 +1,8 @@
 import { constants } from "node:fs";
-import { chmod, lstat, open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import { dirname } from "node:path";
+
+import { FILE_MODE_ENFORCED } from "../telemetry/storage.js";
 
 export function combineEstimates({ catalog, estimates }) {
   const runtimes = Object.fromEntries(estimates.map((estimate) => [estimate.runtime, estimate]));
@@ -19,5 +21,5 @@ export async function writeSafeReport(path, report) {
   const target = await lstat(path).catch((error) => error.code === "ENOENT" ? null : Promise.reject(error));
   if (!parent?.isDirectory() || parent.isSymbolicLink() || (target && (!target.isFile() || target.isSymbolicLink()))) throw new Error("UNSAFE_ESTIMATE_OUTPUT");
   const handle = await open(path, constants.O_NOFOLLOW | constants.O_CREAT | constants.O_TRUNC | constants.O_WRONLY, 0o600);
-  try { await handle.chmod(0o600); await handle.writeFile(`${JSON.stringify(report)}\n`, "utf8"); } finally { await handle.close(); }
+  try { if (FILE_MODE_ENFORCED) await handle.chmod(0o600); await handle.writeFile(`${JSON.stringify(report)}\n`, "utf8"); } finally { await handle.close(); }
 }

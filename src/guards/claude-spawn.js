@@ -2,7 +2,7 @@ import { resolveClaudeRequestedRoutes } from "../adapters/claude/index.js";
 import { isInjectableClaudeModel } from "../config/claude-models.js";
 import { createEvent } from "../telemetry/event.js";
 import { hmacRef } from "../telemetry/identity.js";
-import { appendJsonl } from "../telemetry/storage.js";
+import { FILE_MODE_LIMITATIONS, appendJsonl } from "../telemetry/storage.js";
 
 // An explicit model — on the call, or a concrete CLAUDE_CODE_SUBAGENT_MODEL — is a
 // deliberate choice. The router yields to it and records the divergence rather than
@@ -97,11 +97,11 @@ function decisionEvent({ input, result, contract, scope, contractSha256, resolve
       environment_override: environmentOverride(input),
     },
     model_evidence: {}, usage: null,
-    provenance: { source: "runtime-hook", limitations: ["effective-model-unproven"], policy_projection_sha256: policyProvenance.policy_projection_sha256, projected_guidance_bytes: policyProvenance.projected_guidance_bytes },
+    provenance: { source: "runtime-hook", limitations: ["effective-model-unproven", ...FILE_MODE_LIMITATIONS], policy_projection_sha256: policyProvenance.policy_projection_sha256, projected_guidance_bytes: policyProvenance.projected_guidance_bytes },
   });
 }
 
-export async function runClaudeSpawnGuard({ input, contract, runtimeDefaults, telemetryRoot, collectorInstanceRef, telemetryKey, identifiers, appendTelemetry, now = () => new Date().toISOString(), scope, contractSha256, policyProvenance, resolverPolicyVersion }) {
+export async function runClaudeSpawnGuard({ input, contract, runtimeDefaults, telemetryRoot, telemetryBase, collectorInstanceRef, telemetryKey, identifiers, appendTelemetry, now = () => new Date().toISOString(), scope, contractSha256, policyProvenance, resolverPolicyVersion }) {
   let result;
   try {
     result = evaluateClaudeAgentSpawn({ input, contract, runtimeDefaults });
@@ -112,7 +112,7 @@ export async function runClaudeSpawnGuard({ input, contract, runtimeDefaults, te
   try {
     event = decisionEvent({ input, result, contract, scope, contractSha256, resolverPolicyVersion, collectorInstanceRef, telemetryKey, identifiers, policyProvenance, now });
     if (event === undefined) return Object.freeze({ ...result, telemetry_recorded: false });
-    const outcome = await (appendTelemetry ?? ((entry) => appendJsonl(telemetryRoot, entry)))(event);
+    const outcome = await (appendTelemetry ?? ((entry) => appendJsonl(telemetryRoot, entry, { trustedBase: telemetryBase })))(event);
     return Object.freeze({ ...result, telemetry_recorded: outcome?.written !== false });
   } catch {
     return Object.freeze({ ...result, telemetry_recorded: false });

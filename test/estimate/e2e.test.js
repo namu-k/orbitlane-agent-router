@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -33,7 +33,11 @@ async function fixtureEnvironment(t) {
   await cp(join(fixtures, "codex", "linked", "child-terra.jsonl"), join(sessions, "child-terra.jsonl"));
   await cp(join(fixtures, "codex", "linked", "child-luna.jsonl"), join(sessions, "child-luna.jsonl"));
   const rootFixture = await readFile(join(fixtures, "codex", "linked", "root.jsonl"), "utf8");
-  await writeFile(join(sessions, "root.jsonl"), rootFixture.replace("__PROJECT_CWD__", resolve(project)));
+  // The estimator matches a rollout to the project by canonical path, so the fixture has
+  // to record the canonical form too. Windows hands back an 8.3 short name from tmpdir and
+  // macOS reaches it through /var -> /private/var; either one leaves the recorded cwd
+  // unequal to what the CLI resolves, and the root then fails to link its children.
+  await writeFile(join(sessions, "root.jsonl"), rootFixture.replace("__PROJECT_CWD__", await realpath(resolve(project))));
   t.after(async () => { await import("node:fs/promises").then(({ rm }) => rm(project, { recursive: true, force: true })); });
   return { project, env: { CODEX_HOME: codexHome } };
 }

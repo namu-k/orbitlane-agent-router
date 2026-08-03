@@ -1,5 +1,5 @@
 import { lstat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { resolveEffectiveContract } from "../guards/resolve-contract.js";
 import { readJsonl } from "../telemetry/storage.js";
@@ -158,7 +158,10 @@ export function normalizeClaudeEvents({ decisions, usages, corruptLines = 0, tot
 }
 
 async function readEvidenceFiles(directory) {
-  const [decision, usage] = await Promise.all([readJsonl(join(directory, DECISION_FILE)), readJsonl(join(directory, USAGE_FILE))]);
+  const [decision, usage] = await Promise.all([
+    readJsonl(join(directory, DECISION_FILE), { trustedBase: directory }),
+    readJsonl(join(directory, USAGE_FILE), { trustedBase: directory }),
+  ]);
   return { records: [...decision.records, ...usage.records], corruptLines: decision.corrupt_lines.length + usage.corrupt_lines.length,
     totalLines: decision.records.length + usage.records.length + decision.corrupt_lines.length + usage.corrupt_lines.length + Number(decision.partial_last_line) + Number(usage.partial_last_line) };
 }
@@ -187,7 +190,7 @@ export async function loadClaudeEvidence({ cwd = process.cwd(), session = "lates
     if (info === null) throw new Error("CLAUDE_EVIDENCE_PATH_NOT_FOUND");
     if (info.isDirectory()) loaded = await readEvidenceFiles(path);
     else if (info.isFile()) {
-      const file = await readJsonl(path);
+      const file = await readJsonl(path, { trustedBase: dirname(path) });
       loaded = { records: [...file.records], corruptLines: file.corrupt_lines.length,
         totalLines: file.records.length + file.corrupt_lines.length + Number(file.partial_last_line) };
     } else throw new Error("CLAUDE_EVIDENCE_PATH_UNSAFE");
