@@ -3,9 +3,10 @@ import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
-const cli = new URL("../bin/orbitlane.js", import.meta.url);
-const invoke = (args, options = {}) => new Promise((resolveResult) => { const child = spawn(process.execPath, [cli.pathname, ...args], { cwd: options.cwd, env: { ...process.env, ...(options.env ?? options) } }); let stdout=""; let stderr=""; child.stdout.on("data", c => stdout += c); child.stderr.on("data", c => stderr += c); child.on("close", code => resolveResult({ code, stdout, stderr })); });
+const cli = fileURLToPath(new URL("../bin/orbitlane.js", import.meta.url));
+const invoke = (args, options = {}) => new Promise((resolveResult) => { const child = spawn(process.execPath, [cli, ...args], { cwd: options.cwd, env: { ...process.env, ...(options.env ?? options) } }); let stdout=""; let stderr=""; child.stdout.on("data", c => stdout += c); child.stderr.on("data", c => stderr += c); child.on("close", code => resolveResult({ code, stdout, stderr })); });
 test("estimate requires runtime and output and rejects auto plus explicit session", async () => {
   const output = join(await mkdtemp(join(tmpdir(), "orbitlane-cli-")), "report.json");
   assert.match((await invoke(["estimate", "--output", output])).stderr, /RUNTIME_REQUIRED/);
