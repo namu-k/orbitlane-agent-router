@@ -105,6 +105,8 @@ High, Medium, Low, and Insufficient confidence use score bands of 80+, 55–79, 
 
 This is a heuristic estimate, not a billing statement or proven net savings.
 
+Evidence and reports stay local. On Windows, Node cannot enforce POSIX mode `0600`; events declare `file-mode-unenforced`, and file access follows the containing directory's Windows ACLs.
+
 ## Two-layer installation
 
 OrbitLane installs in two layers. Both runtimes merge their global and project
@@ -328,7 +330,7 @@ OrbitLane is designed for local configuration control.
 - Never publish local evidence bundles as repository content.
 - Never label requested-model receipts as effective-model proof.
 
-Telemetry is not planned for v1.
+OrbitLane records only local routing-decision and usage evidence for the offline estimator. It does not transmit telemetry or collect prompts, responses, transcripts, credentials, or source code.
 
 ## Frequently asked questions
 

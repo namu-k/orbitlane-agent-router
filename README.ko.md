@@ -105,6 +105,8 @@ Claude의 `latest`는 프로젝트 `.orbitlane/evidence/project` 증거를 읽�
 
 This is a heuristic estimate, not a billing statement or proven net savings.
 
+Evidence와 report는 로컬에만 남습니다. Windows에서는 Node가 POSIX mode `0600`을 보장할 수 없으므로 event에 `file-mode-unenforced`를 기록하며, 파일 접근 권한은 상위 디렉터리의 Windows ACL을 따릅니다.
+
 ## 2-레이어 설치
 
 OrbitLane은 두 레이어로 설치한다. 두 런타임 모두 전역과 프로젝트 instruction 파일을
@@ -316,7 +318,7 @@ OrbitLane은 로컬 configuration control을 목표로 합니다.
 - 로컬 evidence bundle을 repository content로 게시하지 않습니다.
 - 요청 모델 receipt를 실제 모델 증거로 표시하지 않습니다.
 
-v1에는 telemetry를 넣지 않을 계획입니다.
+OrbitLane은 오프라인 추정기를 위한 로컬 routing-decision 및 usage evidence만 기록합니다. Telemetry를 전송하지 않으며 prompt, response, transcript, credential 또는 source code를 수집하지 않습니다.
 
 ## 자주 묻는 질문
 

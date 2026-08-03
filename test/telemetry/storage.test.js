@@ -38,6 +38,7 @@ test("appendJsonl refuses symlinks and safely withdraws telemetry on write failu
   const link = join(trustedBase, "evidence-link.jsonl");
   await symlink(target, link);
   assert.deepEqual(await appendJsonl(link, { event_id: "one" }, { trustedBase }), { written: false });
+  await assert.rejects(readJsonl(link, { trustedBase }), /UNSAFE_TELEMETRY_PATH/);
 
   const directory = join(trustedBase, "directory-target");
   await mkdir(directory);

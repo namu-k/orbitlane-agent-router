@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readFile, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 const FILE_MODE = 0o600;
@@ -71,26 +71,19 @@ async function privateDirectory(path, trustedBase) {
   if (FILE_MODE_ENFORCED) await chmod(path, DIRECTORY_MODE);
 }
 
-async function privateFile(path) {
-  const info = await lstat(path).catch((error) => error.code === "ENOENT" ? null : Promise.reject(error));
-  if (info && (!info.isFile() || info.isSymbolicLink())) throw new Error("UNSAFE_TELEMETRY_PATH");
-  if (info) {
-    assertCurrentOwner(info);
-    if (FILE_MODE_ENFORCED) await chmod(path, FILE_MODE);
-  }
-}
-
 export async function appendJsonl(path, event, { trustedBase } = {}) {
   try {
     if (typeof path !== "string" || path.length === 0) throw new TypeError("INVALID_TELEMETRY_PATH");
     const line = `${JSON.stringify(event)}\n`;
     if (Buffer.byteLength(line, "utf8") >= 4096) throw new RangeError("OVERSIZED_TELEMETRY_EVENT");
     await privateDirectory(dirname(path), trustedBase);
-    await privateFile(path);
     const handle = await open(path, constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | constants.O_NOFOLLOW, FILE_MODE);
     try {
-      await handle.write(line, null, "utf8");
+      const info = await handle.stat();
+      if (!info.isFile()) throw new Error("UNSAFE_TELEMETRY_PATH");
+      assertCurrentOwner(info);
       if (FILE_MODE_ENFORCED) await handle.chmod(FILE_MODE);
+      await handle.write(line, null, "utf8");
     } finally {
       await handle.close();
     }
@@ -101,22 +94,35 @@ export async function appendJsonl(path, event, { trustedBase } = {}) {
 }
 
 export async function readPrivateFile(path) {
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
-  assertCurrentOwner(info);
-  if (FILE_MODE_ENFORCED && (info.mode & 0o077) !== 0) throw new Error("UNSAFE_TELEMETRY_PERMISSIONS");
+  const initial = await lstat(path);
+  if (!initial.isFile() || initial.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { return await handle.readFile(); } finally { await handle.close(); }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error("UNSAFE_TELEMETRY_PATH");
+    assertCurrentOwner(info);
+    if (FILE_MODE_ENFORCED && (info.mode & 0o077) !== 0) throw new Error("UNSAFE_TELEMETRY_PERMISSIONS");
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function readJsonl(path, { trustedBase } = {}) {
   let content;
   try {
     if (!await assertSafeAncestry(dirname(path), { trustedBase })) return Object.freeze({ records: Object.freeze([]), corrupt_lines: Object.freeze([]), partial_last_line: false });
-    const info = await lstat(path);
-    if (!info.isFile() || info.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
-    assertCurrentOwner(info);
-    content = await readFile(path, "utf8");
+    const initial = await lstat(path);
+    if (!initial.isFile() || initial.isSymbolicLink()) throw new Error("UNSAFE_TELEMETRY_PATH");
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw new Error("UNSAFE_TELEMETRY_PATH");
+      assertCurrentOwner(info);
+      content = await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
   } catch (error) {
     if (error.code === "ENOENT") return Object.freeze({ records: Object.freeze([]), corrupt_lines: Object.freeze([]), partial_last_line: false });
     throw error;
